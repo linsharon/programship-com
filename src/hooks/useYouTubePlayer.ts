@@ -5,6 +5,7 @@ interface YTPlayer {
   playVideo(): void;
   pauseVideo(): void;
   getCurrentTime(): number;
+  getDuration(): number;
   destroy(): void;
 }
 
@@ -51,25 +52,32 @@ export function useYouTubePlayer(containerRef: RefObject<HTMLDivElement>) {
     });
   }, []);
 
-  const initPlayer = useCallback(async (videoId: string) => {
-    await ensureAPI();
-    const container = containerRef.current;
-    if (!container || !window.YT?.Player) return;
+  const initPlayer = useCallback((videoId: string): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      ensureAPI().then(() => {
+        const container = containerRef.current;
+        if (!container || !window.YT?.Player) { resolve(); return; }
 
-    playerRef.current?.destroy();
-    playerRef.current = null;
-    setIsReady(false);
+        playerRef.current?.destroy();
+        playerRef.current = null;
+        setIsReady(false);
 
-    container.innerHTML = '';
-    const div = document.createElement('div');
-    container.appendChild(div);
+        container.innerHTML = '';
+        const div = document.createElement('div');
+        container.appendChild(div);
 
-    playerRef.current = new window.YT.Player(div, {
-      videoId,
-      playerVars: { rel: 0, modestbranding: 1 },
-      events: { onReady: () => setIsReady(true) },
-    });
-  }, [ensureAPI, containerRef]);
+        try {
+          playerRef.current = new window.YT.Player(div, {
+            videoId,
+            playerVars: { rel: 0, modestbranding: 1 },
+            events: {
+              onReady: () => { setIsReady(true); resolve(); },
+            },
+          });
+        } catch (e) { reject(e); }
+      }).catch(reject);
+    }),
+  [ensureAPI, containerRef]);
 
   const seekAndPlay = useCallback((seconds: number) => {
     playerRef.current?.seekTo(seconds, true);
@@ -80,7 +88,11 @@ export function useYouTubePlayer(containerRef: RefObject<HTMLDivElement>) {
     playerRef.current?.getCurrentTime() ?? 0,
   []);
 
+  const getDuration = useCallback((): number =>
+    playerRef.current?.getDuration() ?? 0,
+  []);
+
   useEffect(() => () => { playerRef.current?.destroy(); }, []);
 
-  return { initPlayer, seekAndPlay, getCurrentTime, isReady };
+  return { initPlayer, seekAndPlay, getCurrentTime, getDuration, isReady };
 }

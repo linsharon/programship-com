@@ -1,303 +1,212 @@
-import { useState, useRef, useEffect, type FormEvent, type ReactNode } from 'react';
 import {
-  Compass, PenTool, Trees, Volume2, VolumeX,
-  CornerDownLeft, Play, Pause,
+  useState, useRef, useEffect,
+  type FormEvent, type ReactNode,
+} from 'react';
+import {
+  Compass, PenTool, Trees,
+  Volume2, VolumeX, CornerDownLeft,
+  Play, Pause, Repeat, Loader2,
 } from 'lucide-react';
 import { useAudio, speakNorwegian } from '../hooks/useAudio';
 import { useYouTubePlayer, extractVideoId } from '../hooks/useYouTubePlayer';
-
-interface AnalysisItem {
-  word: string;
-  detail: string;
-}
-
-interface LyricItem {
-  id: number;
-  cn: string;
-  no: string;
-  timestamp: number;
-  section?: string;
-  analysis: AnalysisItem[];
-}
-
-interface HoveredWord {
-  id: number;
-  word: string;
-}
+import { useLyrics, translateWord, type LyricLine } from '../hooks/useLyrics';
 
 type TabId = 'listen' | 'forest' | 'write';
 
-// ── Complete 一剪梅 lyrics + Norwegian translations ──────────────────────────
-// Timestamps (seconds) are estimated for the 费玉清 classic version.
-const LYRICS_DATA: LyricItem[] = [
-  // ── 第一段 ──────────────────────────────────────────────────────────────
-  {
-    id: 1, section: '第一段',
-    cn: '雪花飘飘，北风萧萧',
-    no: 'Snøen faller lett, nordavinden suser.',
-    timestamp: 5,
-    analysis: [
-      { word: 'Snøen', detail: 'Snø（雪）+ 后置定冠词 -en。在挪威语里，雪长出了尾巴，特指此时此刻落在你眼前的这场冬雪。' },
-      { word: 'faller lett', detail: '轻盈地落下。faller 是现在时，传达动作正在发生的画面感；lett 是副词，让雪花有了重量——极轻的重量。' },
-      { word: 'nordavinden', detail: 'Nordavind（北风）+ 定冠词 -en。北欧神话里，北风是洗涤灵魂的冰冷信使。' },
-      { word: 'suser', detail: '拟声动词，专指风穿过松林或峡湾时发出的沙沙/呼啸声，自带听觉通感。' },
-    ],
-  },
-  {
-    id: 2,
-    cn: '天地一片苍茫',
-    no: 'Mellom himmel og jord, alt er tåke og uendelighet.',
-    timestamp: 13,
-    analysis: [
-      { word: 'Mellom', detail: "介词'在……之间'。挪威语习惯先建立空间坐标轴，再填充内容。" },
-      { word: 'himmel og jord', detail: '天空（himmel）与大地（jord）。人类共识中的宏大概念在挪威语里无需冠词——天地就是天地。' },
-      { word: 'tåke og uendelighet', detail: '迷雾（tåke）与无垠（uendelighet）。挪威人用具体名词把中文"苍茫"的虚无感具象化。' },
-    ],
-  },
-  {
-    id: 3,
-    cn: '一剪寒梅，傲立雪中',
-    no: 'En ensom plommeblomst står stolt i vintersnøen.',
-    timestamp: 19,
-    analysis: [
-      { word: 'En', detail: '阳性不定冠词（≈ a/an）。挪威语没有中文"剪、枝"等量词，万物按词性分三类，极简。' },
-      { word: 'plommeblomst', detail: '梅花。挪威无梅，取道复合词：plomme（李树）+ blomst（花）——诗意的跨文化借用。' },
-      { word: 'står stolt', detail: '骄傲地站立。挪威语对物体姿态极敏感：站 står、躺 ligger、坐 sitter，傲立必须稳稳地"站着"。' },
-      { word: 'i vintersnøen', detail: '在冬雪之中。i（在）+ vintersnø（冬雪）+ 定冠词 -en，将情感锚定于特定时空。' },
-    ],
-  },
-  {
-    id: 4,
-    cn: '只为伊人飘香',
-    no: 'Alt for å spre sin duft til den elskede.',
-    timestamp: 27,
-    analysis: [
-      { word: 'sin duft', detail: '它的芬芳（飘香）。sin 是反身所有格，duft 是香气——这是属于花自己、只为那人散发的香。' },
-      { word: 'den elskede', detail: '所爱之人（伊人）。den（定冠词）+ elskede（elske"爱"的过去分词）= 被爱着的那个人。' },
-    ],
-  },
-  {
-    id: 5,
-    cn: '爱我所爱，无怨无悔',
-    no: 'Å elske det jeg elsker, uten anger, uten bitterhet.',
-    timestamp: 33,
-    analysis: [
-      { word: 'uten anger', detail: '无悔（uten = 没有，anger = 后悔/懊恼）。anger 描述那种从内心深处咬噬的遗憾感。' },
-      { word: 'uten bitterhet', detail: '无怨（bitterhet = 苦涩/怨恨）。bitter（苦）+ -het（名词后缀）——北欧人把苦字写进了词的骨架里。' },
-    ],
-  },
-  {
-    id: 6,
-    cn: '此情长留心间',
-    no: 'Denne kjærligheten lever evig i mitt hjerte.',
-    timestamp: 41,
-    analysis: [
-      { word: 'kjærligheten', detail: '爱情（kjærlighet）+ 定冠词 -en。字面义是"亲爱之物的本质"，是挪威语里最郑重的"爱"。' },
-      { word: 'evig', detail: '永远地、长存（长留）。维京人凝视无尽峡湾时感受到的那种绵延不绝——evig 装载着这份永恒。' },
-      { word: 'i mitt hjerte', detail: '在我心间。hjerte（心）是情感居所，而非跳动的器官；mitt（我的）+ i（在里）完成了归属。' },
-    ],
-  },
-  // ── 副歌 ──────────────────────────────────────────────────────────────
-  {
-    id: 7, section: '副歌',
-    cn: '一生一世等待着你',
-    no: 'I hele mitt liv venter jeg på deg.',
-    timestamp: 48,
-    analysis: [
-      { word: 'I hele mitt liv', detail: '在我整个一生中（一生一世）。hele = 全部/整个，强调无一例外；mitt liv = 我的生命。' },
-      { word: 'venter', detail: '等待（vente 的现在时）。挪威语的等待是主动的——极夜里点着蜡烛守候，而不是被动消耗。' },
-      { word: 'på deg', detail: '等待你（på + deg 宾格）。på 在这里表示等待"朝向"某人的指向感，比中文"等你"多一层方向性。' },
-    ],
-  },
-  {
-    id: 8,
-    cn: '愿化彩蝶翩翩',
-    no: 'Jeg ønsker å bli en fargerik sommerfugl, svevende lett.',
-    timestamp: 57,
-    analysis: [
-      { word: 'fargerik', detail: '色彩丰富的（彩）。farge（颜色）+ rik（丰富）——直接描述视觉感受，不借用任何文化符号。' },
-      { word: 'sommerfugl', detail: '蝴蝶（蝶）。字面意思：sommer（夏天）+ fugl（鸟）= 夏天的鸟。北欧人用季节定义这种生命的短暂与轻盈。' },
-      { word: 'svevende lett', detail: '轻盈飘舞（翩翩）。svevende = 飘浮着的（现在分词），lett = 轻盈，两词叠加传递出翩翩起舞的失重自由感。' },
-    ],
-  },
-  // ── 第二段 ──────────────────────────────────────────────────────────────
-  {
-    id: 9, section: '第二段',
-    cn: '雪花飘飘，北风萧萧',
-    no: 'Snøen faller lett, nordavinden suser.',
-    timestamp: 67,
-    analysis: [],
-  },
-  {
-    id: 10,
-    cn: '天地一片苍茫',
-    no: 'Mellom himmel og jord, alt er tåke og uendelighet.',
-    timestamp: 75,
-    analysis: [],
-  },
-  {
-    id: 11,
-    cn: '一剪寒梅，傲立雪中',
-    no: 'En ensom plommeblomst står stolt i vintersnøen.',
-    timestamp: 81,
-    analysis: [],
-  },
-  {
-    id: 12,
-    cn: '只为伊人飘香',
-    no: 'Alt for å spre sin duft til den elskede.',
-    timestamp: 89,
-    analysis: [],
-  },
-  {
-    id: 13,
-    cn: '爱我所爱，无怨无悔',
-    no: 'Å elske det jeg elsker, uten anger, uten bitterhet.',
-    timestamp: 95,
-    analysis: [],
-  },
-  {
-    id: 14,
-    cn: '此情长留心间',
-    no: 'Denne kjærligheten lever evig i mitt hjerte.',
-    timestamp: 103,
-    analysis: [],
-  },
-  // ── 尾声 ──────────────────────────────────────────────────────────────
-  {
-    id: 15, section: '尾声',
-    cn: '一生一世等待着你',
-    no: 'I hele mitt liv venter jeg på deg.',
-    timestamp: 110,
-    analysis: [],
-  },
-  {
-    id: 16,
-    cn: '愿化彩蝶翩翩',
-    no: 'Jeg ønsker å bli en fargerik sommerfugl, svevende lett.',
-    timestamp: 119,
-    analysis: [],
-  },
-];
-
 const FOREST_CONCEPTS = [
-  { title: 'Snø (雪)',        desc: '衍生出 Morgensnø（清晨刚落未被惊扰的初雪）。挪威人用无数词汇形容雪，如同他们对自然万物的细腻感知。' },
-  { title: 'Vind (风)',       desc: '衍生出 Nordavinden（北风）。北欧神话里，北风常带着洗涤灵魂的冰冷力量，是散步时的极佳伴侣。' },
-  { title: 'Ensomhet (孤独)', desc: '挪威人眼中的孤独并非凄凉，而是 Mørketid（极夜）里在小木屋点起蜡烛、向内探索的自我庇护所。' },
+  { title: 'Snø (雪)',        desc: '挪威语对雪有极细腻的分类。Nysnø = 新雪，Slaps = 泥浆雪，Fonner = 风吹积成的雪堆。北欧人把每种雪都给了独立的名字，仿佛拒绝让任何一场降雪被遗忘。' },
+  { title: 'Vind (风)',       desc: '北欧神话里，北风 Nordavinden 是奥丁的使者。现代挪威语保留了这份崇敬：Vindstille（无风时刻）常被用来形容罕见的平静，有种近乎神圣的稀缺感。' },
+  { title: 'Ensomhet (孤独)', desc: '挪威语区分孤独的两种质地：Ensomhet（孤寂，无人相伴的空洞感）与 Alenetid（独处时光，主动选择的内省空间）。后者甚至被视为一种精神财富。' },
 ];
 
 export default function YiJianMeiApp() {
-  const [activeTab, setActiveTab]                   = useState<TabId>('listen');
-  const [isMuted, setIsMuted]                       = useState(true);
-  const [hoveredWord, setHoveredWord]               = useState<HoveredWord | null>(null);
-  const [journalInput, setJournalInput]             = useState('');
-  const [aiResponse, setAiResponse]                 = useState('');
-  const [currentLine, setCurrentLine]               = useState<number | null>(null);
-  const [isPlayingNorwegian, setIsPlayingNorwegian] = useState(false);
-  const [ytUrl, setYtUrl]                           = useState('');
-  const [showPlayer, setShowPlayer]                 = useState(true);
+  // ── URL inputs ─────────────────────────────────────────────────────────
+  const [ytUrl,     setYtUrl]     = useState('');
+  const [kkboxUrl,  setKkboxUrl]  = useState('');
+  const [inputErr,  setInputErr]  = useState('');
+  const [starting,  setStarting]  = useState(false);
 
-  const { start, stop }  = useAudio();
+  // ── Playback ───────────────────────────────────────────────────────────
+  const [currentLine,  setCurrentLine]  = useState<number | null>(null);
+  const [repeatIdx,    setRepeatIdx]    = useState<number | null>(null);
+  const [showPlayer,   setShowPlayer]   = useState(true);
+
+  // ── Norwegian TTS ──────────────────────────────────────────────────────
+  const [isPlayingNo, setIsPlayingNo] = useState(false);
+
+  // ── Word analysis ──────────────────────────────────────────────────────
+  const [wordInfo, setWordInfo] = useState<{ word: string; meaning: string } | null>(null);
+  const [wordLoading, setWordLoading] = useState(false);
+
+  // ── Tabs / ambient / journal ───────────────────────────────────────────
+  const [activeTab,    setActiveTab]    = useState<TabId>('listen');
+  const [isMuted,      setIsMuted]      = useState(true);
+  const [journalInput, setJournalInput] = useState('');
+  const [aiResponse,   setAiResponse]   = useState('');
+
+  // ── Refs ───────────────────────────────────────────────────────────────
+  const repeatIdxRef     = useRef<number | null>(null);   // stable inside interval
   const playbackRef      = useRef(false);
   const norwegianModeRef = useRef(false);
   const lineRefs         = useRef<(HTMLDivElement | null)[]>([]);
   const ytContainerRef   = useRef<HTMLDivElement>(null);
 
-  const { initPlayer, seekAndPlay, getCurrentTime, isReady: ytReady } =
+  // ── Hooks ──────────────────────────────────────────────────────────────
+  const { start, stop } = useAudio();
+  const { initPlayer, seekAndPlay, getCurrentTime, getDuration, isReady: ytReady } =
     useYouTubePlayer(ytContainerRef);
+  const { lines, status, error, progress, load, reset } = useLyrics();
 
-  // Auto-scroll to active line
+  // ── Auto-scroll ────────────────────────────────────────────────────────
   useEffect(() => {
-    if (currentLine !== null) {
+    if (currentLine !== null)
       lineRefs.current[currentLine]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
   }, [currentLine]);
 
-  // Cancel Norwegian TTS when leaving the listen tab
+  // ── Cancel Norwegian TTS when leaving listen tab ───────────────────────
   useEffect(() => {
     if (activeTab !== 'listen') {
       playbackRef.current = false;
       norwegianModeRef.current = false;
       window.speechSynthesis?.cancel();
-      setIsPlayingNorwegian(false);
+      setIsPlayingNo(false);
       setCurrentLine(null);
     }
   }, [activeTab]);
 
-  // Poll YouTube position to highlight matching lyric line
+  // ── YouTube position polling + repeat logic ────────────────────────────
   useEffect(() => {
-    if (!ytReady) return;
+    if (!ytReady || lines.length === 0) return;
     const id = setInterval(() => {
-      if (norwegianModeRef.current) return; // TTS takes priority
+      if (norwegianModeRef.current) return;
       const t = getCurrentTime();
       if (t <= 0) return;
+
+      // Find current lyric line
       let active: number | null = null;
-      for (let i = LYRICS_DATA.length - 1; i >= 0; i--) {
-        if (LYRICS_DATA[i].timestamp <= t) { active = i; break; }
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].timestamp <= t) { active = i; break; }
       }
       setCurrentLine(active);
-    }, 500);
-    return () => clearInterval(id);
-  }, [ytReady, getCurrentTime]);
 
-  // Cleanup on unmount
+      // Single-line repeat: seek back when the next line starts
+      const ri = repeatIdxRef.current;
+      if (ri !== null) {
+        const nextTs = lines[ri + 1]?.timestamp ?? Infinity;
+        if (t >= nextTs) seekAndPlay(lines[ri].timestamp);
+      }
+    }, 300);
+    return () => clearInterval(id);
+  }, [ytReady, lines, getCurrentTime, seekAndPlay]);
+
+  // ── Cleanup on unmount ────────────────────────────────────────────────
   useEffect(() => () => {
     window.speechSynthesis?.cancel();
     playbackRef.current = false;
   }, []);
 
+  // ── Handlers ──────────────────────────────────────────────────────────
   const handleMuteToggle = () => {
     if (isMuted) { start(); setIsMuted(false); }
     else          { stop();  setIsMuted(true);  }
   };
 
-  const handleUrlChange = (url: string) => {
-    setYtUrl(url);
-    const vid = extractVideoId(url);
-    if (vid) void initPlayer(vid);
+  const handleStart = async () => {
+    setInputErr('');
+    const vid = extractVideoId(ytUrl);
+    if (!vid)          { setInputErr('YouTube 链接无效，请粘贴完整网址。'); return; }
+    if (!kkboxUrl.trim()) { setInputErr('请粘贴 KKBOX 歌曲页面链接。');    return; }
+
+    setStarting(true);
+    try {
+      await initPlayer(vid);
+      let dur = getDuration();
+      // getDuration may be 0 immediately after onReady on some embeds
+      if (dur <= 0) {
+        await new Promise(r => setTimeout(r, 1200));
+        dur = getDuration();
+      }
+      await load(kkboxUrl, dur > 0 ? dur : 240);
+    } catch (e) {
+      setInputErr(e instanceof Error ? e.message : '发生错误，请重试。');
+    } finally {
+      setStarting(false);
+    }
   };
 
-  const handleSeek = (item: LyricItem) => {
+  const handleReset = () => {
+    reset();
+    repeatIdxRef.current = null;
+    setRepeatIdx(null);
+    setCurrentLine(null);
+    setIsPlayingNo(false);
+    setWordInfo(null);
+    playbackRef.current = false;
+    norwegianModeRef.current = false;
+    window.speechSynthesis?.cancel();
+  };
+
+  const handleSeek = (line: LyricLine) => {
     if (!ytReady) return;
-    seekAndPlay(item.timestamp);
+    repeatIdxRef.current = null;
+    setRepeatIdx(null);
+    seekAndPlay(line.timestamp);
   };
 
-  const handleNorwegianSingle = (item: LyricItem, index: number) => {
+  const handleToggleRepeat = (index: number) => {
+    const next = repeatIdxRef.current === index ? null : index;
+    repeatIdxRef.current = next;
+    setRepeatIdx(next);
+    if (next !== null) seekAndPlay(lines[next].timestamp);
+  };
+
+  const handleNorwegianSingle = (line: LyricLine, index: number) => {
     window.speechSynthesis?.cancel();
     playbackRef.current = false;
     norwegianModeRef.current = false;
-    setIsPlayingNorwegian(false);
+    setIsPlayingNo(false);
+    repeatIdxRef.current = null;
+    setRepeatIdx(null);
     setCurrentLine(index);
-    speakNorwegian(item.no, () => {
+    speakNorwegian(line.no || line.cn, () => {
       if (!norwegianModeRef.current) setCurrentLine(null);
     });
   };
 
   const handlePlayNorwegian = async () => {
-    if (isPlayingNorwegian) {
+    if (isPlayingNo) {
       window.speechSynthesis?.cancel();
       playbackRef.current = false;
       norwegianModeRef.current = false;
-      setIsPlayingNorwegian(false);
+      setIsPlayingNo(false);
       setCurrentLine(null);
       return;
     }
-
-    setIsPlayingNorwegian(true);
+    setIsPlayingNo(true);
     playbackRef.current = true;
     norwegianModeRef.current = true;
 
-    for (let i = 0; i < LYRICS_DATA.length; i++) {
+    for (let i = 0; i < lines.length; i++) {
       if (!playbackRef.current) break;
       setCurrentLine(i);
-      await new Promise<void>(resolve => speakNorwegian(LYRICS_DATA[i].no, resolve));
+      await new Promise<void>(res => speakNorwegian(lines[i].no || lines[i].cn, res));
       if (!playbackRef.current) break;
       await new Promise(r => setTimeout(r, 350));
     }
 
-    if (playbackRef.current) { setIsPlayingNorwegian(false); setCurrentLine(null); }
+    if (playbackRef.current) { setIsPlayingNo(false); setCurrentLine(null); }
     playbackRef.current = false;
     norwegianModeRef.current = false;
+  };
+
+  const handleWordClick = async (word: string) => {
+    const clean = word.replace(/[,.'!?，。！？]/g, '').trim();
+    if (!clean || clean.length < 2) return;
+    setWordInfo({ word: clean, meaning: '…' });
+    setWordLoading(true);
+    const meaning = await translateWord(clean);
+    setWordInfo({ word: clean, meaning });
+    setWordLoading(false);
   };
 
   const handleWriteSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -309,8 +218,13 @@ export default function YiJianMeiApp() {
     );
   };
 
-  const hasVideo = extractVideoId(ytUrl) !== null;
+  // ── Derived ──────────────────────────────────────────────────────────
+  const isSetup    = status === 'idle'  || status === 'error';
+  const isLoading  = starting           || status === 'scraping';
+  const isTranslating = status === 'translating';
+  const isReady    = status === 'ready';
 
+  // ── Render ────────────────────────────────────────────────────────────
   return (
     <div className="relative min-h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden flex flex-col selection:bg-emerald-800 selection:text-emerald-100">
 
@@ -327,12 +241,12 @@ export default function YiJianMeiApp() {
       <header className="p-5 flex justify-between items-center z-10 border-b border-slate-900 bg-slate-950/80 backdrop-blur-md shrink-0">
         <div className="flex items-center space-x-3">
           <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
-          <span className="text-sm tracking-widest text-slate-400 font-light">PROSJEKT VINTERSNØ // 一剪梅</span>
+          <span className="text-sm tracking-widest text-slate-400 font-light">PROSJEKT VINTERSNØ // 歌词学习</span>
         </div>
         <button
           onClick={handleMuteToggle}
           className="p-2 rounded-full hover:bg-slate-900 transition-colors text-slate-400 hover:text-slate-200"
-          title={isMuted ? '开启北风声与冬日旋律' : '静音'}
+          title={isMuted ? '开启北风环境音' : '静音'}
         >
           {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} className="text-emerald-400" />}
         </button>
@@ -341,193 +255,243 @@ export default function YiJianMeiApp() {
       {/* 主区域 */}
       <main className="flex-1 max-w-3xl w-full mx-auto px-5 py-4 flex flex-col z-10 min-h-0">
 
-        {/* ── Tab 1: 全词聆听 ── */}
+        {/* ── Tab 1: 歌词学习 ── */}
         {activeTab === 'listen' && (
           <div className="flex flex-col gap-3 h-full animate-fadeIn">
 
-            {/* YouTube URL input */}
-            <div className="shrink-0 space-y-2">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={ytUrl}
-                  onChange={e => handleUrlChange(e.target.value)}
-                  placeholder="粘贴费玉清版 YouTube 链接，逐句定位跟唱…"
-                  className="flex-1 bg-slate-900/80 border border-slate-800 focus:border-emerald-900 rounded-lg px-3 py-2 text-xs text-slate-300 placeholder-slate-600 focus:outline-none transition-colors"
-                />
-                {hasVideo && (
-                  <span className="text-[10px] font-mono shrink-0 text-emerald-500">
-                    {ytReady ? '✓ 已就绪' : '⟳ 加载中'}
-                  </span>
-                )}
+            {/* ── 设置卡片 (idle / error) ── */}
+            {isSetup && (
+              <div className="my-auto space-y-5">
+                <div>
+                  <h2 className="text-lg font-light text-slate-200 mb-1">导入歌曲</h2>
+                  <p className="text-xs text-slate-500">粘贴 YouTube 链接与 KKBOX 歌词页面，自动抓取并翻译成挪威语。</p>
+                </div>
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-500 font-mono tracking-widest uppercase">YouTube 链接</label>
+                    <input
+                      type="text"
+                      value={ytUrl}
+                      onChange={e => setYtUrl(e.target.value)}
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      className="w-full bg-slate-900/80 border border-slate-800 focus:border-emerald-900 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none transition-colors"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-500 font-mono tracking-widest uppercase">KKBOX 歌词页面</label>
+                    <input
+                      type="text"
+                      value={kkboxUrl}
+                      onChange={e => setKkboxUrl(e.target.value)}
+                      placeholder="https://www.kkbox.com/tw/tc/song/..."
+                      className="w-full bg-slate-900/80 border border-slate-800 focus:border-emerald-900 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none transition-colors"
+                    />
+                  </div>
+                  {(inputErr || error) && (
+                    <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">
+                      {inputErr || error}
+                    </p>
+                  )}
+                  <button
+                    onClick={() => void handleStart()}
+                    className="w-full py-2.5 rounded-xl bg-emerald-950 text-emerald-400 border border-emerald-900 hover:bg-emerald-900/40 transition-all text-sm tracking-wider"
+                  >
+                    抓取歌词 &amp; 翻译挪威语
+                  </button>
+                </div>
               </div>
+            )}
 
-              {/* YouTube player */}
-              <div
-                style={{ display: hasVideo && showPlayer ? 'block' : 'none' }}
-                className="rounded-xl overflow-hidden bg-slate-900 border border-slate-800"
-              >
-                <div ref={ytContainerRef} className="w-full aspect-video" />
+            {/* ── 加载中 ── */}
+            {isLoading && (
+              <div className="my-auto flex flex-col items-center gap-4 text-slate-400">
+                <Loader2 size={28} className="animate-spin text-emerald-500" />
+                <p className="text-sm">正在加载 YouTube 播放器…</p>
               </div>
+            )}
 
-              {hasVideo && (
-                <button
-                  onClick={() => setShowPlayer(v => !v)}
-                  className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
-                >
-                  {showPlayer ? '收起播放器 ↑' : '展开播放器 ↓'}
-                </button>
-              )}
-            </div>
+            {/* ── 翻译中 + 歌词区 ── */}
+            {(isTranslating || isReady) && (
+              <div className="flex flex-col gap-3 h-full">
 
-            {/* Song info + Norwegian read-all button */}
-            <div className="flex items-center justify-between shrink-0">
-              <div>
-                <p className="text-[10px] text-emerald-600 font-mono tracking-widest mb-0.5">1983 · 台湾经典民谣</p>
-                <h2 className="text-base font-light text-slate-200 tracking-wide">一剪梅 · Yi Jian Mei</h2>
-              </div>
-              <button
-                onClick={() => void handlePlayNorwegian()}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs tracking-wider border transition-all ${
-                  isPlayingNorwegian
-                    ? 'bg-emerald-950 text-emerald-400 border-emerald-900'
-                    : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
-                }`}
-              >
-                {isPlayingNorwegian ? <Pause size={11} /> : <Play size={11} />}
-                <span>{isPlayingNorwegian ? '暂停' : '全文挪威语朗读'}</span>
-              </button>
-            </div>
+                {/* YouTube player container — always in DOM once loaded */}
+                <div className={showPlayer ? 'shrink-0' : 'hidden'}>
+                  <div className="rounded-xl overflow-hidden bg-slate-900 border border-slate-800">
+                    <div ref={ytContainerRef} className="w-full aspect-video" />
+                  </div>
+                </div>
+                {/* Keep the ref alive even when hidden */}
+                {!showPlayer && <div ref={ytContainerRef} className="hidden" />}
 
-            {/* Lyrics list */}
-            <div className="overflow-y-auto flex-1 space-y-0 pr-1 min-h-0">
-              {LYRICS_DATA.map((item, index) => {
-                const isActive = currentLine === index;
-                return (
-                  <div key={item.id}>
-                    {/* Section label */}
-                    {item.section && (
-                      <div className={`px-4 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
-                        <span className="text-[9px] font-mono text-slate-700 tracking-widest uppercase">
-                          {item.section}
-                        </span>
-                      </div>
+                {/* Controls row */}
+                <div className="flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setShowPlayer(v => !v)}
+                      className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
+                    >
+                      {showPlayer ? '收起播放器 ↑' : '展开播放器 ↓'}
+                    </button>
+                    {isTranslating && (
+                      <span className="text-[10px] text-emerald-600 font-mono flex items-center gap-1">
+                        <Loader2 size={9} className="animate-spin" />
+                        翻译中 {progress}%
+                      </span>
                     )}
-
-                    <div
-                      ref={el => { lineRefs.current[index] = el; }}
-                      className={`group px-4 py-3 rounded-xl transition-all duration-300 border-l-2 ${
-                        isActive
-                          ? 'border-emerald-500 bg-emerald-950/25 shadow-[inset_0_0_20px_rgba(16,185,129,0.04)]'
-                          : 'border-transparent hover:bg-slate-900/40 hover:border-slate-700'
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => void handlePlayNorwegian()}
+                      disabled={isTranslating && lines.filter(l => l.no).length === 0}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs tracking-wider border transition-all ${
+                        isPlayingNo
+                          ? 'bg-emerald-950 text-emerald-400 border-emerald-900'
+                          : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700 disabled:opacity-30'
                       }`}
                     >
-                      <div className="flex items-start gap-3">
-                        {/* Line number */}
-                        <span className={`text-[10px] font-mono mt-0.5 shrink-0 w-4 text-right transition-colors ${
-                          isActive ? 'text-emerald-500' : 'text-slate-700'
-                        }`}>{index + 1}</span>
+                      {isPlayingNo ? <Pause size={10} /> : <Play size={10} />}
+                      <span>{isPlayingNo ? '暂停' : '全文朗读'}</span>
+                    </button>
+                    <button
+                      onClick={handleReset}
+                      className="text-[10px] text-slate-700 hover:text-slate-500 transition-colors border border-slate-800 hover:border-slate-700 px-2.5 py-1.5 rounded-full"
+                    >
+                      重新设置
+                    </button>
+                  </div>
+                </div>
 
-                        {/* Chinese + Norwegian text */}
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-base leading-snug transition-all duration-300 ${
-                            isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-300'
-                          }`}>
-                            {item.cn}
-                          </p>
+                {/* Lyrics list */}
+                <div className="overflow-y-auto flex-1 space-y-0.5 pr-1 min-h-0">
+                  {lines.map((line, index) => {
+                    const isActive  = currentLine === index;
+                    const isRepeat  = repeatIdx === index;
+                    return (
+                      <div
+                        key={line.id}
+                        ref={el => { lineRefs.current[index] = el; }}
+                        className={`group px-4 py-3 rounded-xl transition-all duration-300 border-l-2 ${
+                          isActive
+                            ? 'border-emerald-500 bg-emerald-950/25'
+                            : 'border-transparent hover:bg-slate-900/40 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          {/* Line number */}
+                          <span className={`text-[10px] font-mono mt-0.5 shrink-0 w-5 text-right ${
+                            isActive ? 'text-emerald-500' : 'text-slate-700'
+                          }`}>{index + 1}</span>
 
-                          {/* Norwegian with hoverable analysis words */}
-                          <div className="flex flex-wrap gap-x-1 gap-y-0.5 mt-1">
-                            {item.no.split(' ').map((word, wi) => {
-                              const clean    = word.replace(/[,.']/g, '');
-                              const isTarget = item.analysis.some(a => a.word.includes(clean));
-                              return (
-                                <span
-                                  key={wi}
-                                  className={`text-xs leading-relaxed transition-colors duration-200 ${
-                                    isTarget
-                                      ? 'text-emerald-700 hover:text-emerald-400 underline decoration-emerald-900 underline-offset-2 cursor-pointer'
-                                      : isActive ? 'text-slate-500' : 'text-slate-600'
-                                  }`}
-                                  onMouseEnter={() => { if (isTarget) setHoveredWord({ id: item.id, word: clean }); }}
-                                  onMouseLeave={() => setHoveredWord(null)}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    if (!isTarget) return;
-                                    const next = hoveredWord?.word === clean ? null : { id: item.id, word: clean };
-                                    setHoveredWord(next);
-                                    if (next) speakNorwegian(clean);
-                                  }}
-                                >
-                                  {word}
-                                </span>
-                              );
-                            })}
+                          {/* Text */}
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-base leading-snug transition-colors ${
+                              isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-300'
+                            }`}>
+                              {line.cn}
+                            </p>
+
+                            {/* Norwegian translation */}
+                            <div className="flex flex-wrap gap-x-1 gap-y-0.5 mt-1 min-h-[1.2rem]">
+                              {line.no ? (
+                                line.no.split(' ').map((word, wi) => (
+                                  <span
+                                    key={wi}
+                                    onClick={() => void handleWordClick(word)}
+                                    className={`text-xs leading-relaxed cursor-pointer transition-colors ${
+                                      wordInfo?.word === word.replace(/[,.'!?，。！？]/g, '')
+                                        ? 'text-emerald-400 underline underline-offset-2'
+                                        : isActive
+                                          ? 'text-slate-400 hover:text-emerald-400'
+                                          : 'text-slate-600 hover:text-slate-400'
+                                    }`}
+                                  >
+                                    {word}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-[11px] text-slate-700 italic animate-pulse">翻译中…</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Per-line controls */}
+                          <div className="flex items-center gap-0.5 shrink-0 mt-0.5">
+                            {/* Seek YouTube */}
+                            <button
+                              onClick={() => handleSeek(line)}
+                              title={ytReady ? `跳至 ${line.timestamp}s` : '播放器未就绪'}
+                              className={`p-1.5 rounded-full transition-all ${
+                                ytReady
+                                  ? 'text-slate-600 hover:text-emerald-400 hover:bg-slate-800/60'
+                                  : 'text-slate-800 cursor-not-allowed'
+                              }`}
+                            >
+                              <Play size={10} />
+                            </button>
+
+                            {/* Single-line repeat */}
+                            <button
+                              onClick={() => handleToggleRepeat(index)}
+                              title={isRepeat ? '取消循环' : '单句循环'}
+                              className={`p-1.5 rounded-full transition-all ${
+                                isRepeat
+                                  ? 'text-emerald-400 bg-emerald-950/50'
+                                  : 'text-slate-700 hover:text-emerald-500 hover:bg-slate-800/60'
+                              }`}
+                            >
+                              <Repeat size={10} />
+                            </button>
+
+                            {/* Norwegian TTS */}
+                            <button
+                              onClick={() => handleNorwegianSingle(line, index)}
+                              title="朗读挪威语"
+                              className={`p-1.5 rounded-full transition-all ${
+                                isActive && !isPlayingNo
+                                  ? 'text-emerald-400 animate-pulse'
+                                  : 'text-slate-700 hover:text-emerald-500 hover:bg-slate-800/60'
+                              }`}
+                            >
+                              <Volume2 size={10} />
+                            </button>
                           </div>
                         </div>
 
-                        {/* Per-line controls */}
-                        <div className="flex items-center gap-0.5 shrink-0 mt-0.5">
-                          <button
-                            onClick={() => handleSeek(item)}
-                            title={ytReady ? `跳至 ${item.timestamp}s` : '请先粘贴 YouTube 链接'}
-                            className={`p-1.5 rounded-full transition-all ${
-                              ytReady
-                                ? 'text-slate-600 hover:text-emerald-400 hover:bg-slate-800/60'
-                                : 'text-slate-800 cursor-not-allowed'
-                            }`}
-                          >
-                            <Play size={10} />
-                          </button>
-                          <button
-                            onClick={e => { e.stopPropagation(); handleNorwegianSingle(item, index); }}
-                            title="朗读挪威语"
-                            className={`p-1.5 rounded-full transition-all ${
-                              isActive && !isPlayingNorwegian
-                                ? 'text-emerald-400 animate-pulse'
-                                : 'text-slate-700 hover:text-emerald-500 hover:bg-slate-800/60'
-                            }`}
-                          >
-                            <Volume2 size={10} />
-                          </button>
-                        </div>
+                        {/* Soundwave bars */}
+                        {isActive && (
+                          <div className="mt-2 ml-8 flex gap-0.5 items-end h-3">
+                            {[0, 1, 2, 3, 4].map(i => (
+                              <div
+                                key={i}
+                                className="w-0.5 bg-emerald-500 rounded-full opacity-70 animate-soundwave"
+                                style={{ animationDelay: `${i * 0.14}s` }}
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
+                    );
+                  })}
+                </div>
 
-                      {/* Soundwave bars on active line */}
-                      {isActive && (
-                        <div className="mt-2 ml-7 flex gap-0.5 items-end h-3">
-                          {[0, 1, 2, 3, 4].map(i => (
-                            <div
-                              key={i}
-                              className="w-0.5 bg-emerald-500 rounded-full opacity-70 animate-soundwave"
-                              style={{ animationDelay: `${i * 0.14}s` }}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Word analysis bubble */}
-            <div className="shrink-0 min-h-[58px] p-4 rounded-xl bg-emerald-950/20 border border-emerald-900/30 text-sm text-slate-400 font-light">
-              {hoveredWord ? (
-                <p className="animate-fadeIn leading-relaxed">
-                  <strong className="text-emerald-400 font-medium">{hoveredWord.word}</strong>
-                  {' — '}
-                  {LYRICS_DATA
-                    .find(l => l.id === hoveredWord.id)
-                    ?.analysis.find(a => a.word.includes(hoveredWord.word))
-                    ?.detail}
-                </p>
-              ) : (
-                <p className="text-slate-600 italic text-xs text-center py-1">
-                  点 <Play size={9} className="inline mb-0.5" /> 定位到歌曲对应段落 · 点 <Volume2 size={9} className="inline mb-0.5" /> 朗读挪威语 · 悬停绿色词语法解析
-                </p>
-              )}
-            </div>
+                {/* Word analysis bubble */}
+                <div className="shrink-0 min-h-[52px] p-4 rounded-xl bg-emerald-950/20 border border-emerald-900/30 text-sm text-slate-400 font-light">
+                  {wordInfo ? (
+                    <p className="animate-fadeIn leading-relaxed">
+                      <strong className="text-emerald-400 font-medium">{wordInfo.word}</strong>
+                      {wordLoading
+                        ? <span className="ml-2 text-slate-600 text-xs animate-pulse">查询中…</span>
+                        : <span className="text-slate-400"> — {wordInfo.meaning}</span>
+                      }
+                    </p>
+                  ) : (
+                    <p className="text-slate-700 italic text-xs text-center py-1">
+                      点击挪威语单词查看中文释义 · 点 <Play size={9} className="inline mb-0.5" /> 跳到对应位置 · <Repeat size={9} className="inline mb-0.5" /> 单句循环
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -537,10 +501,10 @@ export default function YiJianMeiApp() {
             {FOREST_CONCEPTS.map((concept, index) => (
               <div
                 key={index}
-                className="p-6 rounded-2xl bg-slate-900/40 border border-slate-900 hover:border-emerald-950 transition-all flex flex-col justify-between space-y-4"
+                className="p-6 rounded-2xl bg-slate-900/40 border border-slate-900 hover:border-emerald-950 transition-all flex flex-col space-y-4"
               >
                 <div>
-                  <span className="text-xs text-emerald-500 uppercase tracking-widest font-mono">意象 {index + 1}</span>
+                  <span className="text-xs text-emerald-500 uppercase tracking-widest font-mono">挪威语意象 {index + 1}</span>
                   <div className="flex items-center justify-between mt-1">
                     <h3 className="text-xl font-light text-slate-200">{concept.title}</h3>
                     <button
@@ -553,9 +517,6 @@ export default function YiJianMeiApp() {
                   </div>
                   <p className="text-sm text-slate-400 mt-3 font-light leading-relaxed">{concept.desc}</p>
                 </div>
-                <div className="pt-4 border-t border-slate-900 text-xs text-slate-500 italic">
-                  源自歌词：{LYRICS_DATA[index].cn}
-                </div>
               </div>
             ))}
           </div>
@@ -566,9 +527,8 @@ export default function YiJianMeiApp() {
           <div className="max-w-xl w-full mx-auto space-y-6 my-auto animate-fadeIn">
             <div className="space-y-2">
               <h2 className="text-lg font-light text-slate-300">Skriveplass // 微写作空间</h2>
-              <p className="text-xs text-slate-500">借用学到的北欧意境，记录你此刻的感受。允许中挪混杂，自由落笔。</p>
+              <p className="text-xs text-slate-500">借用今日歌词里的北欧意境，记录此刻的感受。允许中挪混杂，自由落笔。</p>
             </div>
-
             <form onSubmit={handleWriteSubmit} className="space-y-4">
               <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 focus-within:border-emerald-900 transition-all">
                 <div className="text-sm text-emerald-500/70 font-mono mb-2">
@@ -588,14 +548,12 @@ export default function YiJianMeiApp() {
                 </div>
               </div>
             </form>
-
             {aiResponse && (
               <div className="p-5 rounded-xl bg-emerald-950/10 border border-emerald-900/20 text-sm font-light text-slate-400 leading-relaxed animate-fadeIn">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-emerald-500 font-mono">来自森林木屋的回响：</span>
                   <button
                     onClick={() => speakNorwegian(aiResponse.split('（')[0].trim())}
-                    title="朗读挪威语回应"
                     className="p-1 rounded-full text-slate-600 hover:text-emerald-500 transition-all"
                   >
                     <Volume2 size={12} />
@@ -613,7 +571,7 @@ export default function YiJianMeiApp() {
         <nav className="flex space-x-2 bg-slate-900/60 backdrop-blur-md p-1.5 rounded-full border border-slate-800/80">
           {(
             [
-              { id: 'listen', icon: <Compass size={14} />, label: '全词聆听' },
+              { id: 'listen', icon: <Compass size={14} />, label: '歌词学习' },
               { id: 'forest', icon: <Trees size={14} />,   label: '意象森林' },
               { id: 'write',  icon: <PenTool size={14} />, label: '微写作'  },
             ] as { id: TabId; icon: ReactNode; label: string }[]
