@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Compass, PenTool, Trees, Volume2, VolumeX, CornerDownLeft } from 'lucide-react';
+import { useAudio, speakNorwegian } from '../hooks/useAudio';
 
 interface AnalysisItem {
   word: string;
@@ -57,17 +58,38 @@ const LYRICS_DATA: LyricItem[] = [
 ];
 
 export default function YiJianMeiApp() {
-  const [activeTab, setActiveTab] = useState<TabId>('listen');
-  const [isMuted, setIsMuted] = useState(true);
-  const [hoveredWord, setHoveredWord] = useState<HoveredWord | null>(null);
+  const [activeTab, setActiveTab]         = useState<TabId>('listen');
+  const [isMuted, setIsMuted]             = useState(true);
+  const [hoveredWord, setHoveredWord]     = useState<HoveredWord | null>(null);
   const [activeSentence, setActiveSentence] = useState<LyricItem>(LYRICS_DATA[0]);
-  const [journalInput, setJournalInput] = useState('');
-  const [aiResponse, setAiResponse] = useState('');
+  const [journalInput, setJournalInput]   = useState('');
+  const [aiResponse, setAiResponse]       = useState('');
+  const [speaking, setSpeaking]           = useState<number | null>(null); // lyric id being read
+
+  const { start, stop } = useAudio();
+
+  const handleMuteToggle = () => {
+    if (isMuted) {
+      start();
+      setIsMuted(false);
+    } else {
+      stop();
+      setIsMuted(true);
+    }
+  };
+
+  const handleSpeak = (item: LyricItem) => {
+    setSpeaking(item.id);
+    speakNorwegian(item.no, () => setSpeaking(null));
+  };
 
   const handleWriteSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!journalInput.trim()) return;
-    setAiResponse("Vintersnøen gjemmer alt, men den gjemmer ikke din sjel. (冬雪掩盖了一切，但掩盖不了你的灵魂。此时此刻，北风亦在为你伴奏。)");
+    setAiResponse(
+      "Vintersnøen gjemmer alt, men den gjemmer ikke din sjel. " +
+      "（冬雪掩盖了一切，但掩盖不了你的灵魂。此时此刻，北风亦在为你伴奏。）"
+    );
   };
 
   return (
@@ -75,11 +97,11 @@ export default function YiJianMeiApp() {
 
       {/* 极简慢速飘雪背景 */}
       <div className="absolute inset-0 pointer-events-none opacity-20">
-        <div className="absolute top-[-10%] left-[10%] w-2 h-2 bg-white rounded-full animate-[ping_4s_infinite]"></div>
-        <div className="absolute top-[-5%] left-[40%] w-1.5 h-1.5 bg-white rounded-full animate-[ping_6s_infinite]"></div>
-        <div className="absolute top-[-12%] left-[75%] w-2 h-2 bg-white rounded-full animate-[ping_5s_infinite]"></div>
-        <div className="absolute top-[20%] left-[25%] w-1 h-1 bg-white rounded-full opacity-50"></div>
-        <div className="absolute top-[50%] left-[80%] w-1.5 h-1.5 bg-white rounded-full opacity-40"></div>
+        <div className="absolute top-[-10%] left-[10%]  w-2   h-2   bg-white rounded-full animate-[ping_4s_infinite]"></div>
+        <div className="absolute top-[-5%]  left-[40%]  w-1.5 h-1.5 bg-white rounded-full animate-[ping_6s_infinite]"></div>
+        <div className="absolute top-[-12%] left-[75%]  w-2   h-2   bg-white rounded-full animate-[ping_5s_infinite]"></div>
+        <div className="absolute top-[20%]  left-[25%]  w-1   h-1   bg-white rounded-full opacity-50"></div>
+        <div className="absolute top-[50%]  left-[80%]  w-1.5 h-1.5 bg-white rounded-full opacity-40"></div>
       </div>
 
       {/* 顶栏 */}
@@ -89,11 +111,14 @@ export default function YiJianMeiApp() {
           <span className="text-sm tracking-widest text-slate-400 font-light">PROSJEKT VINTERSNØ // 一剪梅</span>
         </div>
         <button
-          onClick={() => setIsMuted(!isMuted)}
+          onClick={handleMuteToggle}
           className="p-2 rounded-full hover:bg-slate-900 transition-colors text-slate-400 hover:text-slate-200"
-          title={isMuted ? "开启环境白噪音" : "静音"}
+          title={isMuted ? "开启北风声与冬日旋律" : "静音"}
         >
-          {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} className="text-emerald-400" />}
+          {isMuted
+            ? <VolumeX size={18} />
+            : <Volume2 size={18} className="text-emerald-400" />
+          }
         </button>
       </header>
 
@@ -114,18 +139,47 @@ export default function YiJianMeiApp() {
                   }`}
                   onClick={() => setActiveSentence(item)}
                 >
-                  <p className="text-xs text-slate-500 tracking-wider mb-2">{item.cn}</p>
+                  {/* 中文 + 朗读按钮 */}
+                  <div className="flex justify-between items-center mb-2">
+                    <p className="text-xs text-slate-500 tracking-wider">{item.cn}</p>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleSpeak(item); }}
+                      title="朗读挪威语"
+                      className={`p-1.5 rounded-full transition-all ${
+                        speaking === item.id
+                          ? 'text-emerald-400 bg-emerald-950/60 animate-pulse'
+                          : 'text-slate-600 hover:text-emerald-500 hover:bg-slate-900/60'
+                      }`}
+                    >
+                      <Volume2 size={13} />
+                    </button>
+                  </div>
+
+                  {/* 挪威语句子 — 带下划线的单词可点击发音 */}
                   <div className="text-xl md:text-2xl font-light tracking-wide flex flex-wrap gap-x-2 gap-y-1">
                     {item.no.split(' ').map((word, index) => {
                       const cleanWord = word.replace(/[,.]/g, '');
-                      const isTarget = item.analysis.some(a => a.word.includes(cleanWord));
+                      const isTarget  = item.analysis.some(a => a.word.includes(cleanWord));
                       return (
                         <span
                           key={index}
-                          className={`transition-colors duration-200 ${isTarget ? 'underline decoration-emerald-800 decoration-2 underline-offset-4 hover:text-emerald-400 cursor-pointer' : ''}`}
+                          className={`transition-colors duration-200 ${
+                            isTarget
+                              ? 'underline decoration-emerald-800 decoration-2 underline-offset-4 hover:text-emerald-400 cursor-pointer'
+                              : ''
+                          }`}
                           onMouseEnter={() => { if (isTarget) setHoveredWord({ id: item.id, word: cleanWord }); }}
                           onMouseLeave={() => setHoveredWord(null)}
-                          onClick={(e) => { e.stopPropagation(); if (isTarget) setHoveredWord(hoveredWord?.word === cleanWord ? null : { id: item.id, word: cleanWord }); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!isTarget) return;
+                            const next = hoveredWord?.word === cleanWord
+                              ? null
+                              : { id: item.id, word: cleanWord };
+                            setHoveredWord(next);
+                            // Speak the individual word on click
+                            if (next) speakNorwegian(cleanWord);
+                          }}
                         >
                           {word}
                         </span>
@@ -141,12 +195,15 @@ export default function YiJianMeiApp() {
               {hoveredWord ? (
                 <p className="animate-fadeIn">
                   <strong className="text-emerald-400 font-medium">{hoveredWord.word}</strong>: {
-                    LYRICS_DATA.find(l => l.id === hoveredWord.id)?.analysis.find(a => a.word.includes(hoveredWord.word))?.detail
+                    LYRICS_DATA
+                      .find(l => l.id === hoveredWord.id)
+                      ?.analysis.find(a => a.word.includes(hoveredWord.word))
+                      ?.detail
                   }
                 </p>
               ) : (
                 <p className="text-slate-500 italic flex items-center justify-center h-full py-2">
-                  轻触或将鼠标悬停在带下划线的挪威语单词上，倾听它背后的世界观...
+                  点击 <Volume2 size={12} className="mx-1 inline text-slate-500" /> 朗读整句，点击带下划线的单词可单独听发音...
                 </p>
               )}
             </div>
@@ -164,10 +221,22 @@ export default function YiJianMeiApp() {
               ];
               const concept = coreConcepts[index];
               return (
-                <div key={item.id} className="p-6 rounded-2xl bg-slate-900/40 border border-slate-900 hover:border-emerald-950 transition-all flex flex-col justify-between space-y-4">
+                <div
+                  key={item.id}
+                  className="p-6 rounded-2xl bg-slate-900/40 border border-slate-900 hover:border-emerald-950 transition-all flex flex-col justify-between space-y-4"
+                >
                   <div>
                     <span className="text-xs text-emerald-500 uppercase tracking-widest font-mono">意象 {index + 1}</span>
-                    <h3 className="text-xl font-light mt-1 text-slate-200">{concept.title}</h3>
+                    <div className="flex items-center justify-between mt-1">
+                      <h3 className="text-xl font-light text-slate-200">{concept.title}</h3>
+                      <button
+                        onClick={() => speakNorwegian(concept.title.split(' ')[0])}
+                        title="听发音"
+                        className="p-1.5 rounded-full text-slate-600 hover:text-emerald-500 hover:bg-slate-800 transition-all"
+                      >
+                        <Volume2 size={13} />
+                      </button>
+                    </div>
                     <p className="text-sm text-slate-400 mt-3 font-light leading-relaxed">{concept.desc}</p>
                   </div>
                   <div className="pt-4 border-t border-slate-900 text-xs text-slate-500 italic">
@@ -184,13 +253,13 @@ export default function YiJianMeiApp() {
           <div className="max-w-xl w-full mx-auto space-y-6 my-auto animate-fadeIn">
             <div className="space-y-2">
               <h2 className="text-lg font-light text-slate-300">Skriveplass // 微写作空间</h2>
-              <p className="text-xs text-slate-500">借用学到的北欧意境，记录你此刻作为 INFP 的敏锐感受。允许中挪混杂，自由落笔。</p>
+              <p className="text-xs text-slate-500">借用学到的北欧意境，记录你此刻的感受。允许中挪混杂，自由落笔。</p>
             </div>
 
             <form onSubmit={handleWriteSubmit} className="space-y-4">
               <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 focus-within:border-emerald-900 transition-all">
                 <div className="text-sm text-emerald-500/70 font-mono mb-2">
-                  I kveld suser nordavinden, og jeg føler... (今晚北风呼啸，我感到...)
+                  I kveld suser nordavinden, og jeg føler...
                 </div>
                 <textarea
                   value={journalInput}
@@ -199,7 +268,10 @@ export default function YiJianMeiApp() {
                   className="w-full bg-transparent border-none text-slate-200 placeholder-slate-600 focus:outline-none resize-none h-28 text-sm font-light leading-relaxed"
                 />
                 <div className="flex justify-end">
-                  <button type="submit" className="flex items-center space-x-1 text-xs text-emerald-400 hover:text-emerald-300 transition-colors">
+                  <button
+                    type="submit"
+                    className="flex items-center space-x-1 text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
+                  >
                     <span>寄出给森林</span>
                     <CornerDownLeft size={12} />
                   </button>
@@ -209,7 +281,16 @@ export default function YiJianMeiApp() {
 
             {aiResponse && (
               <div className="p-5 rounded-xl bg-emerald-950/10 border border-emerald-900/20 text-sm font-light text-slate-400 leading-relaxed animate-fadeIn">
-                <div className="text-xs text-emerald-500 font-mono mb-1">来自森林木屋的回响：</div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-emerald-500 font-mono">来自森林木屋的回响：</span>
+                  <button
+                    onClick={() => speakNorwegian(aiResponse.split('（')[0].trim())}
+                    title="朗读挪威语回应"
+                    className="p-1 rounded-full text-slate-600 hover:text-emerald-500 transition-all"
+                  >
+                    <Volume2 size={12} />
+                  </button>
+                </div>
                 {aiResponse}
               </div>
             )}
@@ -224,8 +305,8 @@ export default function YiJianMeiApp() {
           {(
             [
               { id: 'listen', icon: <Compass size={14} />, label: '听觉通感' },
-              { id: 'forest', icon: <Trees size={14} />, label: '意象森林' },
-              { id: 'write',  icon: <PenTool size={14} />, label: '微写作' },
+              { id: 'forest', icon: <Trees size={14} />,   label: '意象森林' },
+              { id: 'write',  icon: <PenTool size={14} />, label: '微写作'  },
             ] as { id: TabId; icon: ReactNode; label: string }[]
           ).map(({ id, icon, label }) => (
             <button
