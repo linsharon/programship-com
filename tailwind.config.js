@@ -8,13 +8,17 @@ export default {
           from: { opacity: '0', transform: 'translateY(8px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
-        // Explicitly define ping so arbitrary animate-[ping_Xs_infinite] works
         ping: {
           '75%, 100%': { transform: 'scale(2)', opacity: '0' },
+        },
+        soundwave: {
+          '0%, 100%': { height: '20%' },
+          '50%': { height: '100%' },
         },
       },
       animation: {
         fadeIn: 'fadeIn 0.5s ease-out forwards',
+        soundwave: 'soundwave 0.8s ease-in-out infinite',
       },
     },
   },
