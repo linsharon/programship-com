@@ -179,6 +179,24 @@ export function useAudio() {
   return { start, stop };
 }
 
+export function speakChinese(text: string, onEnd?: () => void) {
+  const synth = window.speechSynthesis;
+  if (!synth) { onEnd?.(); return; }
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang  = 'zh-TW'; // Taiwanese Mandarin — closest to the original song dialect
+  u.rate  = 0.86;
+  u.pitch = 1.05;
+
+  let done = false;
+  const finish = () => { if (!done) { done = true; onEnd?.(); } };
+  u.onend   = finish;
+  u.onerror = finish;
+  // Safety net: if the TTS engine never fires onend, advance anyway
+  setTimeout(finish, Math.max(text.length * 450, 2500));
+  synth.speak(u);
+}
+
 export function speakNorwegian(text: string, onEnd?: () => void) {
   const synth = window.speechSynthesis;
   if (!synth) return;
