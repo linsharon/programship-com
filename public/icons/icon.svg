@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#020617"/>
+  <g stroke="#10b981" stroke-linecap="round" stroke-width="18">
+    <!-- Main axes -->
+    <line x1="256" y1="96" x2="256" y2="416"/>
+    <line x1="96" y1="256" x2="416" y2="256"/>
+    <!-- Diagonals -->
+    <line x1="143" y1="143" x2="369" y2="369"/>
+    <line x1="369" y1="143" x2="143" y2="369"/>
+    <!-- Branches on top arm -->
+    <line x1="256" y1="136" x2="226" y2="166"/>
+    <line x1="256" y1="136" x2="286" y2="166"/>
+    <!-- Branches on bottom arm -->
+    <line x1="256" y1="376" x2="226" y2="346"/>
+    <line x1="256" y1="376" x2="286" y2="346"/>
+    <!-- Branches on left arm -->
+    <line x1="136" y1="256" x2="166" y2="226"/>
+    <line x1="136" y1="256" x2="166" y2="286"/>
+    <!-- Branches on right arm -->
+    <line x1="376" y1="256" x2="346" y2="226"/>
+    <line x1="376" y1="256" x2="346" y2="286"/>
+  </g>
+  <circle cx="256" cy="256" r="18" fill="#10b981"/>
+</svg>
