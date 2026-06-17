@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { useAudio, speakNorwegian } from '../hooks/useAudio';
 import { useYouTubePlayer, extractVideoId } from '../hooks/useYouTubePlayer';
-import { useLyrics, translateWord, type LyricLine } from '../hooks/useLyrics';
+import { useLyrics, translateWord, parsePlainLyrics, type LyricLine } from '../hooks/useLyrics';
 
 type TabId = 'listen' | 'forest' | 'write';
 
@@ -20,11 +20,13 @@ const FOREST_CONCEPTS = [
 ];
 
 export default function YiJianMeiApp() {
-  // ── URL inputs ─────────────────────────────────────────────────────────
-  const [ytUrl,     setYtUrl]     = useState('');
-  const [kkboxUrl,  setKkboxUrl]  = useState('');
-  const [inputErr,  setInputErr]  = useState('');
-  const [starting,  setStarting]  = useState(false);
+  // ── URL / lyrics inputs ────────────────────────────────────────────────
+  const [ytUrl,        setYtUrl]        = useState('');
+  const [kkboxUrl,     setKkboxUrl]     = useState('');
+  const [manualLyrics, setManualLyrics] = useState('');
+  const [lyricsMode,   setLyricsMode]   = useState<'url' | 'paste'>('url');
+  const [inputErr,     setInputErr]     = useState('');
+  const [starting,     setStarting]     = useState(false);
 
   // ── Playback ───────────────────────────────────────────────────────────
   const [currentLine,  setCurrentLine]  = useState<number | null>(null);
@@ -55,7 +57,7 @@ export default function YiJianMeiApp() {
   const { start, stop } = useAudio();
   const { initPlayer, seekAndPlay, getCurrentTime, getDuration, isReady: ytReady } =
     useYouTubePlayer(ytContainerRef);
-  const { lines, status, error, progress, load, reset } = useLyrics();
+  const { lines, status, error, progress, loadFromUrl, loadFromText, reset } = useLyrics();
 
   // ── Auto-scroll ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -114,19 +116,31 @@ export default function YiJianMeiApp() {
   const handleStart = async () => {
     setInputErr('');
     const vid = extractVideoId(ytUrl);
-    if (!vid)          { setInputErr('YouTube 链接无效，请粘贴完整网址。'); return; }
-    if (!kkboxUrl.trim()) { setInputErr('请粘贴 KKBOX 歌曲页面链接。');    return; }
+    if (!vid) { setInputErr('YouTube 链接无效，请粘贴完整网址。'); return; }
+
+    if (lyricsMode === 'url' && !kkboxUrl.trim()) {
+      setInputErr('请粘贴 KKBOX 歌曲页面链接，或切换到「手动粘贴」模式。');
+      return;
+    }
+    if (lyricsMode === 'paste' && parsePlainLyrics(manualLyrics).length === 0) {
+      setInputErr('请粘贴歌词文本（每行一句，需含中文）。');
+      return;
+    }
 
     setStarting(true);
     try {
       await initPlayer(vid);
       let dur = getDuration();
-      // getDuration may be 0 immediately after onReady on some embeds
       if (dur <= 0) {
         await new Promise(r => setTimeout(r, 1200));
         dur = getDuration();
       }
-      await load(kkboxUrl, dur > 0 ? dur : 240);
+      const duration = dur > 0 ? dur : 240;
+      if (lyricsMode === 'url') {
+        await loadFromUrl(kkboxUrl, duration);
+      } else {
+        await loadFromText(manualLyrics, duration);
+      }
     } catch (e) {
       setInputErr(e instanceof Error ? e.message : '发生错误，请重试。');
     } finally {
@@ -264,9 +278,11 @@ export default function YiJianMeiApp() {
               <div className="my-auto space-y-5">
                 <div>
                   <h2 className="text-lg font-light text-slate-200 mb-1">导入歌曲</h2>
-                  <p className="text-xs text-slate-500">粘贴 YouTube 链接与 KKBOX 歌词页面，自动抓取并翻译成挪威语。</p>
+                  <p className="text-xs text-slate-500">选择歌词来源，自动翻译成挪威语并对齐歌曲。</p>
                 </div>
                 <div className="space-y-3">
+
+                  {/* YouTube URL */}
                   <div className="space-y-1">
                     <label className="text-[10px] text-slate-500 font-mono tracking-widest uppercase">YouTube 链接</label>
                     <input
@@ -277,18 +293,58 @@ export default function YiJianMeiApp() {
                       className="w-full bg-slate-900/80 border border-slate-800 focus:border-emerald-900 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none transition-colors"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-slate-500 font-mono tracking-widest uppercase">KKBOX 歌词页面</label>
-                    <input
-                      type="text"
-                      value={kkboxUrl}
-                      onChange={e => setKkboxUrl(e.target.value)}
-                      placeholder="https://www.kkbox.com/tw/tc/song/..."
-                      className="w-full bg-slate-900/80 border border-slate-800 focus:border-emerald-900 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none transition-colors"
-                    />
+
+                  {/* Lyrics source toggle */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1 p-1 bg-slate-900/60 rounded-lg border border-slate-800/60 w-fit">
+                      {(['url', 'paste'] as const).map(mode => (
+                        <button
+                          key={mode}
+                          onClick={() => { setLyricsMode(mode); setInputErr(''); }}
+                          className={`px-3 py-1.5 rounded-md text-xs transition-all ${
+                            lyricsMode === mode
+                              ? 'bg-emerald-950 text-emerald-400 border border-emerald-900'
+                              : 'text-slate-500 hover:text-slate-300'
+                          }`}
+                        >
+                          {mode === 'url' ? 'KKBOX 链接' : '手动粘贴歌词'}
+                        </button>
+                      ))}
+                    </div>
+
+                    {lyricsMode === 'url' ? (
+                      <div className="space-y-1">
+                        <input
+                          type="text"
+                          value={kkboxUrl}
+                          onChange={e => setKkboxUrl(e.target.value)}
+                          placeholder="https://www.kkbox.com/tw/tc/song/..."
+                          className="w-full bg-slate-900/80 border border-slate-800 focus:border-emerald-900 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none transition-colors"
+                        />
+                        <p className="text-[10px] text-slate-700">
+                          若提取失败（登录限制/动态加载），请切换到「手动粘贴」。
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <textarea
+                          value={manualLyrics}
+                          onChange={e => setManualLyrics(e.target.value)}
+                          placeholder={"在此粘贴歌词文本，每行一句。\n支持 LRC 格式或纯文本。\n\n例：\n雪花飘飘，北风萧萧\n天地一片苍茫\n一剪寒梅，傲立雪中"}
+                          rows={8}
+                          className="w-full bg-slate-900/80 border border-slate-800 focus:border-emerald-900 rounded-lg px-3 py-2.5 text-sm text-slate-300 placeholder-slate-700 focus:outline-none transition-colors resize-none font-light leading-relaxed"
+                        />
+                        {manualLyrics && (
+                          <p className="text-[10px] text-emerald-700">
+                            检测到 {parsePlainLyrics(manualLyrics).length} 行中文歌词
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
+
                   {(inputErr || error) && (
-                    <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">
+                    <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2 leading-relaxed">
                       {inputErr || error}
                     </p>
                   )}
@@ -296,7 +352,7 @@ export default function YiJianMeiApp() {
                     onClick={() => void handleStart()}
                     className="w-full py-2.5 rounded-xl bg-emerald-950 text-emerald-400 border border-emerald-900 hover:bg-emerald-900/40 transition-all text-sm tracking-wider"
                   >
-                    抓取歌词 &amp; 翻译挪威语
+                    开始翻译 &amp; 对齐歌曲
                   </button>
                 </div>
               </div>
@@ -314,14 +370,18 @@ export default function YiJianMeiApp() {
             {(isTranslating || isReady) && (
               <div className="flex flex-col gap-3 h-full">
 
-                {/* YouTube player container — always in DOM once loaded */}
-                <div className={showPlayer ? 'shrink-0' : 'hidden'}>
+                {/* YouTube player — always in DOM so the IFrame persists */}
+                <div
+                  className="shrink-0"
+                  style={{ display: showPlayer ? 'block' : 'none' }}
+                >
                   <div className="rounded-xl overflow-hidden bg-slate-900 border border-slate-800">
                     <div ref={ytContainerRef} className="w-full aspect-video" />
                   </div>
                 </div>
-                {/* Keep the ref alive even when hidden */}
-                {!showPlayer && <div ref={ytContainerRef} className="hidden" />}
+                {!showPlayer && (
+                  <div ref={ytContainerRef} style={{ display: 'none' }} />
+                )}
 
                 {/* Controls row */}
                 <div className="flex items-center justify-between shrink-0">
