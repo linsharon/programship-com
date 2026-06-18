@@ -181,9 +181,53 @@ async function translate(text: string, src: string, tgt: string): Promise<string
   catch { return mymemory(text, src, tgt); }
 }
 
-export async function translateWord(word: string): Promise<string> {
-  if (!word.trim()) return '';
-  return translate(word, 'no', 'zh-TW');
+export interface WordAnalysis {
+  meaning: string;
+  type?: string;           // 词性（挪威语返回中文：名词/动词/形容词…）
+  alternatives?: string[]; // 其他常见译法
+}
+
+export async function translateWord(word: string): Promise<WordAnalysis> {
+  if (!word.trim()) return { meaning: word };
+  try {
+    // dt=t → 主翻译  dt=bd → 双语词典（含词性）
+    const url =
+      `https://translate.googleapis.com/translate_a/single` +
+      `?client=gtx&sl=no&tl=zh-TW&dt=t&dt=bd&q=${encodeURIComponent(word)}`;
+    const res  = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const raw   = await res.json() as unknown[][];
+
+    // 主译文
+    const meaning = String(
+      ((raw[0] as unknown[][])?.[0] as unknown[])?.[0] ?? word,
+    ).trim();
+
+    // 词性 + 备选译法（来自 dt=bd）
+    let type: string | undefined;
+    const alternatives: string[] = [];
+    const bd = raw[1] as unknown[][] | undefined;
+    if (Array.isArray(bd)) {
+      for (const entry of bd) {
+        const e = entry as unknown[];
+        if (!type && typeof e[0] === 'string') type = e[0] as string;
+        if (Array.isArray(e[1])) {
+          for (const alt of e[1] as unknown[][]) {
+            const m = (alt as unknown[])[0];
+            if (typeof m === 'string' && m !== meaning) alternatives.push(m);
+          }
+        }
+      }
+    }
+    return { meaning, type, alternatives: alternatives.slice(0, 3) };
+  } catch {
+    try {
+      const m = await mymemory(word, 'no', 'zh-TW');
+      return { meaning: m };
+    } catch {
+      return { meaning: word };
+    }
+  }
 }
 
 // ── Timestamp distribution ─────────────────────────────────────────────────

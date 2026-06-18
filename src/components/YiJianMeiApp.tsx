@@ -5,13 +5,24 @@ import {
 import {
   Compass, PenTool, Trees,
   Volume2, VolumeX, CornerDownLeft,
-  Play, Pause, Repeat, Loader2,
+  Play, Pause, Repeat, Loader2, X,
 } from 'lucide-react';
 import { useAudio, speakNorwegian } from '../hooks/useAudio';
 import { useYouTubePlayer, extractVideoId } from '../hooks/useYouTubePlayer';
-import { useLyrics, translateWord, parsePlainLyrics, type LyricLine } from '../hooks/useLyrics';
+import {
+  useLyrics, translateWord, parsePlainLyrics,
+  type LyricLine, type WordAnalysis,
+} from '../hooks/useLyrics';
 
 type TabId = 'listen' | 'forest' | 'write';
+
+interface WordTooltip {
+  word: string;
+  analysis: WordAnalysis | null;
+  x: number;
+  y: number;
+  yBottom: number;
+}
 
 const FOREST_CONCEPTS = [
   { title: 'Snø (雪)',        desc: '挪威语对雪有极细腻的分类。Nysnø = 新雪，Slaps = 泥浆雪，Fonner = 风吹积成的雪堆。北欧人把每种雪都给了独立的名字，仿佛拒绝让任何一场降雪被遗忘。' },
@@ -32,12 +43,13 @@ export default function YiJianMeiApp() {
   const [currentLine,  setCurrentLine]  = useState<number | null>(null);
   const [repeatIdx,    setRepeatIdx]    = useState<number | null>(null);
   const [showPlayer,   setShowPlayer]   = useState(true);
+  const [offsetDelta,  setOffsetDelta]  = useState(0);
 
   // ── Norwegian TTS ──────────────────────────────────────────────────────
   const [isPlayingNo, setIsPlayingNo] = useState(false);
 
-  // ── Word analysis ──────────────────────────────────────────────────────
-  const [wordInfo, setWordInfo] = useState<{ word: string; meaning: string } | null>(null);
+  // ── Word tooltip ───────────────────────────────────────────────────────
+  const [wordTooltip, setWordTooltip] = useState<WordTooltip | null>(null);
   const [wordLoading, setWordLoading] = useState(false);
 
   // ── Tabs / ambient / journal ───────────────────────────────────────────
@@ -47,11 +59,13 @@ export default function YiJianMeiApp() {
   const [aiResponse,   setAiResponse]   = useState('');
 
   // ── Refs ───────────────────────────────────────────────────────────────
-  const repeatIdxRef     = useRef<number | null>(null);   // stable inside interval
+  const repeatIdxRef     = useRef<number | null>(null);
   const playbackRef      = useRef(false);
   const norwegianModeRef = useRef(false);
+  const offsetDeltaRef   = useRef(0);
   const lineRefs         = useRef<(HTMLDivElement | null)[]>([]);
   const ytContainerRef   = useRef<HTMLDivElement>(null);
+  const tooltipRef       = useRef<HTMLDivElement>(null);
 
   // ── Hooks ──────────────────────────────────────────────────────────────
   const { start, stop } = useAudio();
@@ -76,6 +90,18 @@ export default function YiJianMeiApp() {
     }
   }, [activeTab]);
 
+  // ── Close word tooltip on outside click ───────────────────────────────
+  useEffect(() => {
+    if (!wordTooltip) return;
+    const handler = (e: globalThis.MouseEvent) => {
+      if (tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) {
+        setWordTooltip(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [wordTooltip]);
+
   // ── YouTube position polling + repeat logic ────────────────────────────
   useEffect(() => {
     if (!ytReady || lines.length === 0) return;
@@ -84,18 +110,17 @@ export default function YiJianMeiApp() {
       const t = getCurrentTime();
       if (t <= 0) return;
 
-      // Find current lyric line
+      const off = offsetDeltaRef.current;
       let active: number | null = null;
       for (let i = lines.length - 1; i >= 0; i--) {
-        if (lines[i].timestamp <= t) { active = i; break; }
+        if (lines[i].timestamp + off <= t) { active = i; break; }
       }
       setCurrentLine(active);
 
-      // Single-line repeat: seek back when the next line starts
       const ri = repeatIdxRef.current;
       if (ri !== null) {
-        const nextTs = lines[ri + 1]?.timestamp ?? Infinity;
-        if (t >= nextTs) seekAndPlay(lines[ri].timestamp);
+        const nextTs = (lines[ri + 1]?.timestamp ?? Infinity) + off;
+        if (t >= nextTs) seekAndPlay(lines[ri].timestamp + off);
       }
     }, 300);
     return () => clearInterval(id);
@@ -151,10 +176,12 @@ export default function YiJianMeiApp() {
   const handleReset = () => {
     reset();
     repeatIdxRef.current = null;
+    offsetDeltaRef.current = 0;
     setRepeatIdx(null);
     setCurrentLine(null);
     setIsPlayingNo(false);
-    setWordInfo(null);
+    setWordTooltip(null);
+    setOffsetDelta(0);
     playbackRef.current = false;
     norwegianModeRef.current = false;
     window.speechSynthesis?.cancel();
@@ -164,17 +191,19 @@ export default function YiJianMeiApp() {
     if (!ytReady) return;
     repeatIdxRef.current = null;
     setRepeatIdx(null);
-    seekAndPlay(line.timestamp);
+    seekAndPlay(line.timestamp + offsetDeltaRef.current);
   };
 
-  const handleToggleRepeat = (index: number) => {
+  const handleToggleRepeat = (e: { stopPropagation(): void }, index: number) => {
+    e.stopPropagation();
     const next = repeatIdxRef.current === index ? null : index;
     repeatIdxRef.current = next;
     setRepeatIdx(next);
-    if (next !== null) seekAndPlay(lines[next].timestamp);
+    if (next !== null) seekAndPlay(lines[next].timestamp + offsetDeltaRef.current);
   };
 
-  const handleNorwegianSingle = (line: LyricLine, index: number) => {
+  const handleNorwegianSingle = (e: { stopPropagation(): void }, line: LyricLine, index: number) => {
+    e.stopPropagation();
     window.speechSynthesis?.cancel();
     playbackRef.current = false;
     norwegianModeRef.current = false;
@@ -213,14 +242,25 @@ export default function YiJianMeiApp() {
     norwegianModeRef.current = false;
   };
 
-  const handleWordClick = async (word: string) => {
+  const handleWordClick = async (
+    word: string,
+    e: { stopPropagation(): void; currentTarget: EventTarget | null },
+  ) => {
+    e.stopPropagation();
     const clean = word.replace(/[,.'!?，。！？]/g, '').trim();
     if (!clean || clean.length < 2) return;
-    setWordInfo({ word: clean, meaning: '…' });
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setWordTooltip({ word: clean, analysis: null, x: rect.left, y: rect.top, yBottom: rect.bottom });
     setWordLoading(true);
-    const meaning = await translateWord(clean);
-    setWordInfo({ word: clean, meaning });
+    const analysis = await translateWord(clean);
+    setWordTooltip(prev => prev?.word === clean ? { ...prev, analysis } : prev);
     setWordLoading(false);
+  };
+
+  const handleAdjustOffset = (delta: number) => {
+    const next = offsetDeltaRef.current + delta;
+    offsetDeltaRef.current = next;
+    setOffsetDelta(next);
   };
 
   const handleWriteSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -233,10 +273,10 @@ export default function YiJianMeiApp() {
   };
 
   // ── Derived ──────────────────────────────────────────────────────────
-  const isSetup    = status === 'idle'  || status === 'error';
-  const isLoading  = starting           || status === 'scraping';
+  const isSetup       = status === 'idle'  || status === 'error';
+  const isLoading     = starting           || status === 'scraping';
   const isTranslating = status === 'translating';
-  const isReady    = status === 'ready';
+  const isReady       = status === 'ready';
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
@@ -250,6 +290,61 @@ export default function YiJianMeiApp() {
         <div className="absolute top-[20%]  left-[25%]  w-1   h-1   bg-white rounded-full opacity-50" />
         <div className="absolute top-[50%]  left-[80%]  w-1.5 h-1.5 bg-white rounded-full opacity-40" />
       </div>
+
+      {/* Floating word tooltip */}
+      {wordTooltip && (
+        <div
+          ref={tooltipRef}
+          style={{
+            position: 'fixed',
+            left: Math.min(Math.max(wordTooltip.x, 8), window.innerWidth - 272),
+            top: wordTooltip.y > 200
+              ? wordTooltip.y - 8
+              : wordTooltip.yBottom + 8,
+            transform: wordTooltip.y > 200 ? 'translateY(-100%)' : 'none',
+            zIndex: 50,
+          }}
+          className="w-64 p-3 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl shadow-black/60 animate-fadeIn"
+        >
+          <div className="flex items-start justify-between mb-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-emerald-400 font-medium text-base">{wordTooltip.word}</span>
+              {wordTooltip.analysis?.type && (
+                <span className="text-[10px] text-slate-500 font-mono bg-slate-800 px-1.5 py-0.5 rounded">
+                  {wordTooltip.analysis.type}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => setWordTooltip(null)}
+              className="text-slate-600 hover:text-slate-400 transition-colors shrink-0 mt-0.5 ml-2"
+            >
+              <X size={12} />
+            </button>
+          </div>
+
+          {wordLoading ? (
+            <p className="text-xs text-slate-600 animate-pulse">查询中…</p>
+          ) : wordTooltip.analysis ? (
+            <div className="space-y-1.5">
+              <p className="text-sm text-slate-300">{wordTooltip.analysis.meaning}</p>
+              {(wordTooltip.analysis.alternatives ?? []).length > 0 && (
+                <p className="text-xs text-slate-500">
+                  亦可译：{(wordTooltip.analysis.alternatives ?? []).join('、')}
+                </p>
+              )}
+            </div>
+          ) : null}
+
+          <button
+            onClick={() => speakNorwegian(wordTooltip.word)}
+            className="mt-2.5 flex items-center gap-1.5 text-xs text-slate-500 hover:text-emerald-400 transition-colors"
+          >
+            <Volume2 size={11} />
+            <span>朗读挪威语</span>
+          </button>
+        </div>
+      )}
 
       {/* 顶栏 */}
       <header className="p-5 flex justify-between items-center z-10 border-b border-slate-900 bg-slate-950/80 backdrop-blur-md shrink-0">
@@ -370,35 +465,49 @@ export default function YiJianMeiApp() {
             {(isTranslating || isReady) && (
               <div className="flex flex-col gap-3 h-full">
 
-                {/* YouTube player — always in DOM so the IFrame persists */}
-                <div
-                  className="shrink-0"
-                  style={{ display: showPlayer ? 'block' : 'none' }}
-                >
+                {/* YouTube player — single always-in-DOM container; wrapper toggles display */}
+                <div className="shrink-0" style={{ display: showPlayer ? 'block' : 'none' }}>
                   <div className="rounded-xl overflow-hidden bg-slate-900 border border-slate-800">
                     <div ref={ytContainerRef} className="w-full aspect-video" />
                   </div>
                 </div>
-                {!showPlayer && (
-                  <div ref={ytContainerRef} style={{ display: 'none' }} />
-                )}
+                {/* Keep ref container in DOM even when hidden so IFrame persists */}
+                {!showPlayer && <div ref={ytContainerRef} className="hidden" />}
 
                 {/* Controls row */}
-                <div className="flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between shrink-0 flex-wrap gap-y-2">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <button
                       onClick={() => setShowPlayer(v => !v)}
                       className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
                     >
                       {showPlayer ? '收起播放器 ↑' : '展开播放器 ↓'}
                     </button>
+
                     {isTranslating && (
                       <span className="text-[10px] text-emerald-600 font-mono flex items-center gap-1">
                         <Loader2 size={9} className="animate-spin" />
                         翻译中 {progress}%
                       </span>
                     )}
+
+                    {/* Timing offset controls */}
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-slate-600">对齐</span>
+                      <button
+                        onClick={() => handleAdjustOffset(-5)}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-500 hover:text-slate-300 transition-colors"
+                      >−5s</button>
+                      <span className="text-[10px] text-slate-500 font-mono w-8 text-center">
+                        {offsetDelta > 0 ? '+' : ''}{offsetDelta}s
+                      </span>
+                      <button
+                        onClick={() => handleAdjustOffset(5)}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-500 hover:text-slate-300 transition-colors"
+                      >+5s</button>
+                    </div>
                   </div>
+
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => void handlePlayNorwegian()}
@@ -421,16 +530,17 @@ export default function YiJianMeiApp() {
                   </div>
                 </div>
 
-                {/* Lyrics list */}
+                {/* Lyrics list — clicking any row seeks to that line */}
                 <div className="overflow-y-auto flex-1 space-y-0.5 pr-1 min-h-0">
                   {lines.map((line, index) => {
-                    const isActive  = currentLine === index;
-                    const isRepeat  = repeatIdx === index;
+                    const isActive = currentLine === index;
+                    const isRepeat = repeatIdx === index;
                     return (
                       <div
                         key={line.id}
                         ref={el => { lineRefs.current[index] = el; }}
-                        className={`group px-4 py-3 rounded-xl transition-all duration-300 border-l-2 ${
+                        onClick={() => handleSeek(line)}
+                        className={`group px-4 py-3 rounded-xl transition-all duration-300 border-l-2 cursor-pointer select-none ${
                           isActive
                             ? 'border-emerald-500 bg-emerald-950/25'
                             : 'border-transparent hover:bg-slate-900/40 hover:border-slate-700'
@@ -450,15 +560,15 @@ export default function YiJianMeiApp() {
                               {line.cn}
                             </p>
 
-                            {/* Norwegian translation */}
+                            {/* Norwegian translation — each word is clickable for tooltip */}
                             <div className="flex flex-wrap gap-x-1 gap-y-0.5 mt-1 min-h-[1.2rem]">
                               {line.no ? (
                                 line.no.split(' ').map((word, wi) => (
                                   <span
                                     key={wi}
-                                    onClick={() => void handleWordClick(word)}
-                                    className={`text-xs leading-relaxed cursor-pointer transition-colors ${
-                                      wordInfo?.word === word.replace(/[,.'!?，。！？]/g, '')
+                                    onClick={e => void handleWordClick(word, e)}
+                                    className={`text-xs leading-relaxed cursor-pointer transition-colors select-text ${
+                                      wordTooltip?.word === word.replace(/[,.'!?，。！？]/g, '')
                                         ? 'text-emerald-400 underline underline-offset-2'
                                         : isActive
                                           ? 'text-slate-400 hover:text-emerald-400'
@@ -474,12 +584,12 @@ export default function YiJianMeiApp() {
                             </div>
                           </div>
 
-                          {/* Per-line controls */}
+                          {/* Per-line controls — stopPropagation so row click isn't triggered */}
                           <div className="flex items-center gap-0.5 shrink-0 mt-0.5">
                             {/* Seek YouTube */}
                             <button
-                              onClick={() => handleSeek(line)}
-                              title={ytReady ? `跳至 ${line.timestamp}s` : '播放器未就绪'}
+                              onClick={e => { e.stopPropagation(); handleSeek(line); }}
+                              title={ytReady ? `跳至 ${line.timestamp + offsetDelta}s` : '播放器未就绪'}
                               className={`p-1.5 rounded-full transition-all ${
                                 ytReady
                                   ? 'text-slate-600 hover:text-emerald-400 hover:bg-slate-800/60'
@@ -491,7 +601,7 @@ export default function YiJianMeiApp() {
 
                             {/* Single-line repeat */}
                             <button
-                              onClick={() => handleToggleRepeat(index)}
+                              onClick={e => handleToggleRepeat(e, index)}
                               title={isRepeat ? '取消循环' : '单句循环'}
                               className={`p-1.5 rounded-full transition-all ${
                                 isRepeat
@@ -504,7 +614,7 @@ export default function YiJianMeiApp() {
 
                             {/* Norwegian TTS */}
                             <button
-                              onClick={() => handleNorwegianSingle(line, index)}
+                              onClick={e => handleNorwegianSingle(e, line, index)}
                               title="朗读挪威语"
                               className={`p-1.5 rounded-full transition-all ${
                                 isActive && !isPlayingNo
@@ -532,23 +642,6 @@ export default function YiJianMeiApp() {
                       </div>
                     );
                   })}
-                </div>
-
-                {/* Word analysis bubble */}
-                <div className="shrink-0 min-h-[52px] p-4 rounded-xl bg-emerald-950/20 border border-emerald-900/30 text-sm text-slate-400 font-light">
-                  {wordInfo ? (
-                    <p className="animate-fadeIn leading-relaxed">
-                      <strong className="text-emerald-400 font-medium">{wordInfo.word}</strong>
-                      {wordLoading
-                        ? <span className="ml-2 text-slate-600 text-xs animate-pulse">查询中…</span>
-                        : <span className="text-slate-400"> — {wordInfo.meaning}</span>
-                      }
-                    </p>
-                  ) : (
-                    <p className="text-slate-700 italic text-xs text-center py-1">
-                      点击挪威语单词查看中文释义 · 点 <Play size={9} className="inline mb-0.5" /> 跳到对应位置 · <Repeat size={9} className="inline mb-0.5" /> 单句循环
-                    </p>
-                  )}
                 </div>
               </div>
             )}
