@@ -12,7 +12,7 @@ import { useAudio, speakNorwegian } from '../hooks/useAudio';
 import { useYouTubePlayer, extractVideoId } from '../hooks/useYouTubePlayer';
 import {
   useLyrics, translateWord, parsePlainLyrics,
-  type LyricLine, type WordAnalysis,
+  type LyricLine, type WordAnalysis, type ForestConcept,
 } from '../hooks/useLyrics';
 import { useSongLibrary, type SongEntry } from '../hooks/useSongLibrary';
 
@@ -26,11 +26,58 @@ interface WordTooltip {
   yBottom: number;
 }
 
-const FOREST_CONCEPTS = [
-  { title: 'Snø (雪)',        desc: '挪威语对雪有极细腻的分类。Nysnø = 新雪，Slaps = 泥浆雪，Fonner = 风吹积成的雪堆。北欧人把每种雪都给了独立的名字，仿佛拒绝让任何一场降雪被遗忘。' },
-  { title: 'Vind (风)',       desc: '北欧神话里，北风 Nordavinden 是奥丁的使者。现代挪威语保留了这份崇敬：Vindstille（无风时刻）常被用来形容罕见的平静，有种近乎神圣的稀缺感。' },
-  { title: 'Ensomhet (孤独)', desc: '挪威语区分孤独的两种质地：Ensomhet（孤寂，无人相伴的空洞感）与 Alenetid（独处时光，主动选择的内省空间）。后者甚至被视为一种精神财富。' },
-];
+// ── Forest concept generation ──────────────────────────────────────────────
+const NO_STOPWORDS = new Set([
+  'og', 'er', 'det', 'jeg', 'du', 'vi', 'de', 'den', 'en', 'et',
+  'på', 'til', 'av', 'for', 'med', 'om', 'at', 'ikke', 'som', 'han',
+  'hun', 'men', 'så', 'fra', 'var', 'seg', 'har', 'kan', 'vil', 'skal',
+  'må', 'sin', 'sitt', 'din', 'ditt', 'deg', 'meg', 'oss', 'dem', 'der',
+  'her', 'nå', 'da', 'når', 'hvis', 'også', 'bare', 'alle', 'min', 'mitt',
+  'dine', 'sine', 'deres', 'vår', 'etter', 'over', 'under', 'inn', 'igjen',
+  'mot', 'inn', 'opp', 'ned', 'bort', 'aldri', 'alltid', 'dette', 'disse',
+]);
+
+async function generateForestConcepts(lines: LyricLine[]): Promise<ForestConcept[]> {
+  // Collect unique candidate words with their source line, preserving song order
+  const candidates: Array<{ word: string; lineCn: string }> = [];
+  const seen = new Set<string>();
+
+  for (const line of lines) {
+    if (!line.no) continue;
+    for (const raw of line.no.split(/\s+/)) {
+      const word = raw.replace(/[,.'!?;:()[\]]/g, '').toLowerCase();
+      if (word.length >= 5 && !NO_STOPWORDS.has(word) && !seen.has(word)) {
+        seen.add(word);
+        candidates.push({ word, lineCn: line.cn });
+      }
+    }
+  }
+
+  // Pick 3 words spread across the song (beginning / middle / end)
+  const n = candidates.length;
+  const indices =
+    n === 0 ? [] :
+    n === 1 ? [0] :
+    n === 2 ? [0, 1] :
+    [0, Math.floor(n / 2), n - 1];
+
+  const picks = indices.map(i => candidates[i]);
+
+  const concepts: ForestConcept[] = [];
+  for (const { word, lineCn } of picks) {
+    try {
+      const analysis = await translateWord(word);
+      concepts.push({
+        no: word,
+        cn: analysis.meaning,
+        type: analysis.type,
+        alternatives: analysis.alternatives,
+        lineCn,
+      });
+    } catch { /* skip on error */ }
+  }
+  return concepts;
+}
 
 export default function YiJianMeiApp() {
   // ── URL / lyrics inputs ────────────────────────────────────────────────
@@ -53,6 +100,11 @@ export default function YiJianMeiApp() {
   // ── Word tooltip ───────────────────────────────────────────────────────
   const [wordTooltip, setWordTooltip] = useState<WordTooltip | null>(null);
   const [wordLoading, setWordLoading] = useState(false);
+
+  // ── Forest concepts ────────────────────────────────────────────────────
+  const [forestConcepts,      setForestConcepts]      = useState<ForestConcept[]>([]);
+  const [isGeneratingForest,  setIsGeneratingForest]  = useState(false);
+  const forestGenRef = useRef(false); // true = already generated / loaded for this song
 
   // ── Library save feedback ──────────────────────────────────────────────
   const [justSaved, setJustSaved] = useState(false);
@@ -111,9 +163,19 @@ export default function YiJianMeiApp() {
     return () => document.removeEventListener('mousedown', handler);
   }, [wordTooltip]);
 
+  // ── Generate forest concepts once lyrics reach 'ready' state ──────────
+  useEffect(() => {
+    if (status !== 'ready' || lines.length === 0 || forestGenRef.current) return;
+    forestGenRef.current = true;
+    setIsGeneratingForest(true);
+    void generateForestConcepts(lines).then(concepts => {
+      setForestConcepts(concepts);
+      setIsGeneratingForest(false);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
   // ── Deferred player init after library load ────────────────────────────
-  // After loadFromSaved sets status='ready', React re-renders and the
-  // ytContainerRef div enters the DOM. This effect fires after that render.
   useEffect(() => {
     if (!pendingVideoId) return;
     const vid = pendingVideoId;
@@ -161,11 +223,14 @@ export default function YiJianMeiApp() {
     reset();
     repeatIdxRef.current = null;
     offsetDeltaRef.current = 0;
+    forestGenRef.current = false;
     setRepeatIdx(null);
     setCurrentLine(null);
     setIsPlayingNo(false);
     setWordTooltip(null);
     setOffsetDelta(0);
+    setForestConcepts([]);
+    setIsGeneratingForest(false);
     setJustSaved(false);
     playbackRef.current = false;
     norwegianModeRef.current = false;
@@ -286,7 +351,7 @@ export default function YiJianMeiApp() {
   const handleSave = () => {
     if (!lines.length) return;
     const title = lines[0].cn.slice(0, 18);
-    saveEntry(title, ytUrl, lines);
+    saveEntry(title, ytUrl, lines, forestConcepts);
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 2500);
   };
@@ -296,6 +361,12 @@ export default function YiJianMeiApp() {
     setYtUrl(entry.ytUrl);
     setActiveTab('listen');
     doReset();
+    // Restore forest concepts — if none saved, the useEffect will regenerate them
+    const saved = entry.forestConcepts ?? [];
+    if (saved.length > 0) {
+      forestGenRef.current = true; // skip regeneration
+      setForestConcepts(saved);
+    }
     loadFromSaved(entry.lines);
     if (vid) setPendingVideoId(vid);
   };
@@ -314,6 +385,7 @@ export default function YiJianMeiApp() {
   const isLoading     = starting           || status === 'scraping';
   const isTranslating = status === 'translating';
   const isReady       = status === 'ready';
+  const hasLyrics     = isTranslating || isReady;
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
@@ -350,10 +422,7 @@ export default function YiJianMeiApp() {
                 </span>
               )}
             </div>
-            <button
-              onClick={() => setWordTooltip(null)}
-              className="text-slate-600 hover:text-slate-400 transition-colors shrink-0 mt-0.5 ml-2"
-            >
+            <button onClick={() => setWordTooltip(null)} className="text-slate-600 hover:text-slate-400 transition-colors shrink-0 mt-0.5 ml-2">
               <X size={12} />
             </button>
           </div>
@@ -373,8 +442,7 @@ export default function YiJianMeiApp() {
             onClick={() => speakNorwegian(wordTooltip.word)}
             className="mt-2.5 flex items-center gap-1.5 text-xs text-slate-500 hover:text-emerald-400 transition-colors"
           >
-            <Volume2 size={11} />
-            <span>朗读挪威语</span>
+            <Volume2 size={11} /><span>朗读挪威语</span>
           </button>
         </div>
       )}
@@ -404,7 +472,7 @@ export default function YiJianMeiApp() {
             {/* YouTube container — always mounted in listen tab so initPlayer finds a live DOM node */}
             <div
               ref={ytContainerRef}
-              style={{ display: (isTranslating || isReady) && showPlayer ? 'block' : 'none' }}
+              style={{ display: hasLyrics && showPlayer ? 'block' : 'none' }}
               className="shrink-0 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 w-full aspect-video"
             />
 
@@ -500,7 +568,7 @@ export default function YiJianMeiApp() {
             )}
 
             {/* ── 翻译中 + 歌词区 ── */}
-            {(isTranslating || isReady) && (
+            {hasLyrics && (
               <div className="flex flex-col gap-3 h-full">
 
                 {/* Controls row */}
@@ -520,7 +588,6 @@ export default function YiJianMeiApp() {
                       </span>
                     )}
 
-                    {/* Timing offset controls */}
                     <div className="flex items-center gap-1">
                       <span className="text-[10px] text-slate-600">对齐</span>
                       <button
@@ -538,7 +605,6 @@ export default function YiJianMeiApp() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {/* Save to library */}
                     {isReady && (
                       <button
                         onClick={handleSave}
@@ -575,7 +641,7 @@ export default function YiJianMeiApp() {
                   </div>
                 </div>
 
-                {/* Lyrics list — clicking any row seeks to that line */}
+                {/* Lyrics list */}
                 <div className="overflow-y-auto flex-1 space-y-0.5 pr-1 min-h-0">
                   {lines.map((line, index) => {
                     const isActive = currentLine === index;
@@ -602,7 +668,6 @@ export default function YiJianMeiApp() {
                             }`}>
                               {line.cn}
                             </p>
-
                             <div className="flex flex-wrap gap-x-1 gap-y-0.5 mt-1 min-h-[1.2rem]">
                               {line.no ? (
                                 line.no.split(' ').map((word, wi) => (
@@ -685,28 +750,86 @@ export default function YiJianMeiApp() {
 
         {/* ── Tab 2: 意象森林 ── */}
         {activeTab === 'forest' && (
-          <div className="grid md:grid-cols-3 gap-6 my-auto animate-fadeIn">
-            {FOREST_CONCEPTS.map((concept, index) => (
-              <div
-                key={index}
-                className="p-6 rounded-2xl bg-slate-900/40 border border-slate-900 hover:border-emerald-950 transition-all flex flex-col space-y-4"
-              >
-                <div>
-                  <span className="text-xs text-emerald-500 uppercase tracking-widest font-mono">挪威语意象 {index + 1}</span>
-                  <div className="flex items-center justify-between mt-1">
-                    <h3 className="text-xl font-light text-slate-200">{concept.title}</h3>
-                    <button
-                      onClick={() => speakNorwegian(concept.title.split(' ')[0])}
-                      title="听发音"
-                      className="p-1.5 rounded-full text-slate-600 hover:text-emerald-500 hover:bg-slate-800 transition-all"
+          <div className="flex flex-col gap-4 h-full animate-fadeIn">
+            <div className="shrink-0">
+              <h2 className="text-lg font-light text-slate-200">意象森林</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {hasLyrics
+                  ? '从当前歌词中提取的挪威语关键词'
+                  : '载入歌曲后，森林将从歌词中自动生成挪威语意象'}
+              </p>
+            </div>
+
+            {/* No song loaded */}
+            {!hasLyrics && !isGeneratingForest && forestConcepts.length === 0 && (
+              <div className="my-auto flex flex-col items-center justify-center gap-4 text-slate-700">
+                <Trees size={48} className="opacity-20" />
+                <p className="text-sm text-center text-slate-600">
+                  先在「歌词学习」载入一首歌曲，<br />
+                  意象森林会自动从翻译结果中生成。
+                </p>
+              </div>
+            )}
+
+            {/* Generating */}
+            {isGeneratingForest && (
+              <div className="my-auto flex flex-col items-center gap-3 text-slate-600">
+                <Loader2 size={24} className="animate-spin text-emerald-600" />
+                <p className="text-sm">正在从歌词提取挪威语意象…</p>
+              </div>
+            )}
+
+            {/* Concepts ready */}
+            {!isGeneratingForest && forestConcepts.length > 0 && (
+              <div className="overflow-y-auto flex-1 min-h-0">
+                <div className="grid md:grid-cols-3 gap-4">
+                  {forestConcepts.map((concept, index) => (
+                    <div
+                      key={index}
+                      className="p-5 rounded-2xl bg-slate-900/40 border border-slate-900 hover:border-emerald-950 transition-all flex flex-col gap-3"
                     >
-                      <Volume2 size={13} />
-                    </button>
-                  </div>
-                  <p className="text-sm text-slate-400 mt-3 font-light leading-relaxed">{concept.desc}</p>
+                      <span className="text-xs text-emerald-500 uppercase tracking-widest font-mono">
+                        意象 {index + 1}
+                      </span>
+
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-xl font-light text-slate-200">{concept.no}</h3>
+                            {concept.type && (
+                              <span className="text-[10px] text-slate-600 font-mono bg-slate-800 px-1.5 py-0.5 rounded shrink-0">
+                                {concept.type}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-slate-300 text-sm font-light">{concept.cn}</p>
+                        </div>
+                        <button
+                          onClick={() => speakNorwegian(concept.no)}
+                          title="听发音"
+                          className="p-1.5 rounded-full text-slate-600 hover:text-emerald-500 hover:bg-slate-800 transition-all shrink-0 mt-0.5"
+                        >
+                          <Volume2 size={13} />
+                        </button>
+                      </div>
+
+                      {(concept.alternatives ?? []).length > 0 && (
+                        <p className="text-xs text-slate-600">
+                          亦可译：{(concept.alternatives ?? []).join('、')}
+                        </p>
+                      )}
+
+                      <div className="mt-auto pt-3 border-t border-slate-800/50">
+                        <p className="text-[10px] text-slate-600 mb-1">出自歌词</p>
+                        <p className="text-xs text-slate-500 font-light leading-relaxed">
+                          「{concept.lineCn}」
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
           </div>
         )}
 
@@ -775,7 +898,11 @@ export default function YiJianMeiApp() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-slate-200 font-light truncate">{entry.title}</p>
                       <p className="text-[11px] text-slate-600 mt-0.5">
-                        {entry.lines.length} 行歌词 · {new Date(entry.savedAt).toLocaleDateString('zh-TW')}
+                        {entry.lines.length} 行歌词
+                        {entry.forestConcepts?.length
+                          ? ` · ${entry.forestConcepts.length} 个意象`
+                          : ''}
+                        {' · '}{new Date(entry.savedAt).toLocaleDateString('zh-TW')}
                       </p>
                       <p className="text-[10px] text-slate-700 font-mono mt-0.5 truncate">
                         {entry.ytUrl}
@@ -817,7 +944,8 @@ export default function YiJianMeiApp() {
           {(
             [
               { id: 'listen',  icon: <Compass size={14} />,  label: '歌词学习' },
-              { id: 'forest',  icon: <Trees size={14} />,    label: '意象森林' },
+              { id: 'forest',  icon: <Trees size={14} />,    label: '意象森林',
+                badge: hasLyrics && forestConcepts.length > 0 ? forestConcepts.length : undefined },
               { id: 'write',   icon: <PenTool size={14} />,  label: '微写作'  },
               { id: 'library', icon: <BookOpen size={14} />, label: '我的歌单',
                 badge: library.length > 0 ? library.length : undefined },

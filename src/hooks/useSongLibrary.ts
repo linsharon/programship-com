@@ -1,11 +1,14 @@
 import { useState, useCallback } from 'react';
-import type { LyricLine } from './useLyrics';
+import type { LyricLine, ForestConcept } from './useLyrics';
+
+export type { ForestConcept };
 
 export interface SongEntry {
   id: string;
   title: string;
   ytUrl: string;
   lines: LyricLine[];
+  forestConcepts: ForestConcept[];
   savedAt: number;
 }
 
@@ -25,12 +28,18 @@ function writeLib(entries: SongEntry[]) {
 export function useSongLibrary() {
   const [entries, setEntries] = useState<SongEntry[]>(readLib);
 
-  const save = useCallback((title: string, ytUrl: string, lines: LyricLine[]): void => {
+  const save = useCallback((
+    title: string,
+    ytUrl: string,
+    lines: LyricLine[],
+    forestConcepts: ForestConcept[],
+  ): void => {
     const entry: SongEntry = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       title,
       ytUrl,
       lines,
+      forestConcepts,
       savedAt: Date.now(),
     };
     setEntries(prev => {

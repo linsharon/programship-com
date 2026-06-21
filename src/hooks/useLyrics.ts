@@ -187,6 +187,14 @@ export interface WordAnalysis {
   alternatives?: string[]; // 其他常见译法
 }
 
+export interface ForestConcept {
+  no: string;          // Norwegian word
+  cn: string;          // Chinese translation
+  type?: string;
+  alternatives?: string[];
+  lineCn: string;      // the Chinese lyric line it came from
+}
+
 export async function translateWord(word: string): Promise<WordAnalysis> {
   if (!word.trim()) return { meaning: word };
   try {
