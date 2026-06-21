@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 
 export interface LyricLine {
   id: number;
@@ -269,7 +269,7 @@ export function useLyrics() {
   const [status,   setStatus]   = useState<LyricStatus>('idle');
   const [error,    setError]    = useState('');
   const [progress, setProgress] = useState(0);
-  const cancelRef = { current: false };
+  const cancelRef = useRef(false);
 
   /** Load from KKBOX URL — scrapes + translates */
   const loadFromUrl = useCallback(async (kkboxUrl: string, duration: number) => {
@@ -329,5 +329,15 @@ export function useLyrics() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { lines, status, error, progress, loadFromUrl, loadFromText, reset };
+  /** Restore previously saved lines — skips scraping and translation */
+  const loadFromSaved = useCallback((savedLines: LyricLine[]) => {
+    cancelRef.current = true;
+    setLines(savedLines);
+    setStatus('ready');
+    setError('');
+    setProgress(100);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return { lines, status, error, progress, loadFromUrl, loadFromText, reset, loadFromSaved };
 }

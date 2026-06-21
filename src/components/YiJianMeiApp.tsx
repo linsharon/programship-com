@@ -3,9 +3,10 @@ import {
   type FormEvent, type ReactNode,
 } from 'react';
 import {
-  Compass, PenTool, Trees,
+  Compass, PenTool, Trees, BookOpen,
   Volume2, VolumeX, CornerDownLeft,
   Play, Pause, Repeat, Loader2, X,
+  Bookmark, BookmarkCheck, Trash2,
 } from 'lucide-react';
 import { useAudio, speakNorwegian } from '../hooks/useAudio';
 import { useYouTubePlayer, extractVideoId } from '../hooks/useYouTubePlayer';
@@ -13,8 +14,9 @@ import {
   useLyrics, translateWord, parsePlainLyrics,
   type LyricLine, type WordAnalysis,
 } from '../hooks/useLyrics';
+import { useSongLibrary, type SongEntry } from '../hooks/useSongLibrary';
 
-type TabId = 'listen' | 'forest' | 'write';
+type TabId = 'listen' | 'forest' | 'write' | 'library';
 
 interface WordTooltip {
   word: string;
@@ -52,6 +54,12 @@ export default function YiJianMeiApp() {
   const [wordTooltip, setWordTooltip] = useState<WordTooltip | null>(null);
   const [wordLoading, setWordLoading] = useState(false);
 
+  // ── Library save feedback ──────────────────────────────────────────────
+  const [justSaved, setJustSaved] = useState(false);
+
+  // ── Deferred player init (needed when loading from library) ───────────
+  const [pendingVideoId, setPendingVideoId] = useState<string | null>(null);
+
   // ── Tabs / ambient / journal ───────────────────────────────────────────
   const [activeTab,    setActiveTab]    = useState<TabId>('listen');
   const [isMuted,      setIsMuted]      = useState(true);
@@ -71,9 +79,11 @@ export default function YiJianMeiApp() {
   const { start, stop } = useAudio();
   const { initPlayer, seekAndPlay, getCurrentTime, getDuration, isReady: ytReady } =
     useYouTubePlayer(ytContainerRef);
-  const { lines, status, error, progress, loadFromUrl, loadFromText, reset } = useLyrics();
+  const { lines, status, error, progress, loadFromUrl, loadFromText, reset, loadFromSaved } =
+    useLyrics();
+  const { entries: library, save: saveEntry, remove: removeEntry } = useSongLibrary();
 
-  // ── Auto-scroll ────────────────────────────────────────────────────────
+  // ── Auto-scroll active lyric line ──────────────────────────────────────
   useEffect(() => {
     if (currentLine !== null)
       lineRefs.current[currentLine]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -94,13 +104,22 @@ export default function YiJianMeiApp() {
   useEffect(() => {
     if (!wordTooltip) return;
     const handler = (e: globalThis.MouseEvent) => {
-      if (tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) {
+      if (tooltipRef.current && !tooltipRef.current.contains(e.target as Node))
         setWordTooltip(null);
-      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [wordTooltip]);
+
+  // ── Deferred player init after library load ────────────────────────────
+  // After loadFromSaved sets status='ready', React re-renders and the
+  // ytContainerRef div enters the DOM. This effect fires after that render.
+  useEffect(() => {
+    if (!pendingVideoId) return;
+    const vid = pendingVideoId;
+    setPendingVideoId(null);
+    void initPlayer(vid);
+  }, [pendingVideoId, initPlayer]);
 
   // ── YouTube position polling + repeat logic ────────────────────────────
   useEffect(() => {
@@ -138,6 +157,21 @@ export default function YiJianMeiApp() {
     else          { stop();  setIsMuted(true);  }
   };
 
+  const doReset = () => {
+    reset();
+    repeatIdxRef.current = null;
+    offsetDeltaRef.current = 0;
+    setRepeatIdx(null);
+    setCurrentLine(null);
+    setIsPlayingNo(false);
+    setWordTooltip(null);
+    setOffsetDelta(0);
+    setJustSaved(false);
+    playbackRef.current = false;
+    norwegianModeRef.current = false;
+    window.speechSynthesis?.cancel();
+  };
+
   const handleStart = async () => {
     setInputErr('');
     const vid = extractVideoId(ytUrl);
@@ -171,20 +205,6 @@ export default function YiJianMeiApp() {
     } finally {
       setStarting(false);
     }
-  };
-
-  const handleReset = () => {
-    reset();
-    repeatIdxRef.current = null;
-    offsetDeltaRef.current = 0;
-    setRepeatIdx(null);
-    setCurrentLine(null);
-    setIsPlayingNo(false);
-    setWordTooltip(null);
-    setOffsetDelta(0);
-    playbackRef.current = false;
-    norwegianModeRef.current = false;
-    window.speechSynthesis?.cancel();
   };
 
   const handleSeek = (line: LyricLine) => {
@@ -263,6 +283,23 @@ export default function YiJianMeiApp() {
     setOffsetDelta(next);
   };
 
+  const handleSave = () => {
+    if (!lines.length) return;
+    const title = lines[0].cn.slice(0, 18);
+    saveEntry(title, ytUrl, lines);
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 2500);
+  };
+
+  const handleLoadSaved = (entry: SongEntry) => {
+    const vid = extractVideoId(entry.ytUrl);
+    setYtUrl(entry.ytUrl);
+    setActiveTab('listen');
+    doReset();
+    loadFromSaved(entry.lines);
+    if (vid) setPendingVideoId(vid);
+  };
+
   const handleWriteSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!journalInput.trim()) return;
@@ -298,9 +335,7 @@ export default function YiJianMeiApp() {
           style={{
             position: 'fixed',
             left: Math.min(Math.max(wordTooltip.x, 8), window.innerWidth - 272),
-            top: wordTooltip.y > 200
-              ? wordTooltip.y - 8
-              : wordTooltip.yBottom + 8,
+            top: wordTooltip.y > 200 ? wordTooltip.y - 8 : wordTooltip.yBottom + 8,
             transform: wordTooltip.y > 200 ? 'translateY(-100%)' : 'none',
             zIndex: 50,
           }}
@@ -322,7 +357,6 @@ export default function YiJianMeiApp() {
               <X size={12} />
             </button>
           </div>
-
           {wordLoading ? (
             <p className="text-xs text-slate-600 animate-pulse">查询中…</p>
           ) : wordTooltip.analysis ? (
@@ -335,7 +369,6 @@ export default function YiJianMeiApp() {
               )}
             </div>
           ) : null}
-
           <button
             onClick={() => speakNorwegian(wordTooltip.word)}
             className="mt-2.5 flex items-center gap-1.5 text-xs text-slate-500 hover:text-emerald-400 transition-colors"
@@ -368,6 +401,13 @@ export default function YiJianMeiApp() {
         {activeTab === 'listen' && (
           <div className="flex flex-col gap-3 h-full animate-fadeIn">
 
+            {/* YouTube container — always mounted in listen tab so initPlayer finds a live DOM node */}
+            <div
+              ref={ytContainerRef}
+              style={{ display: (isTranslating || isReady) && showPlayer ? 'block' : 'none' }}
+              className="shrink-0 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 w-full aspect-video"
+            />
+
             {/* ── 设置卡片 (idle / error) ── */}
             {isSetup && (
               <div className="my-auto space-y-5">
@@ -377,7 +417,6 @@ export default function YiJianMeiApp() {
                 </div>
                 <div className="space-y-3">
 
-                  {/* YouTube URL */}
                   <div className="space-y-1">
                     <label className="text-[10px] text-slate-500 font-mono tracking-widest uppercase">YouTube 链接</label>
                     <input
@@ -389,7 +428,6 @@ export default function YiJianMeiApp() {
                     />
                   </div>
 
-                  {/* Lyrics source toggle */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-1 p-1 bg-slate-900/60 rounded-lg border border-slate-800/60 w-fit">
                       {(['url', 'paste'] as const).map(mode => (
@@ -465,15 +503,6 @@ export default function YiJianMeiApp() {
             {(isTranslating || isReady) && (
               <div className="flex flex-col gap-3 h-full">
 
-                {/* YouTube player — single always-in-DOM container; wrapper toggles display */}
-                <div className="shrink-0" style={{ display: showPlayer ? 'block' : 'none' }}>
-                  <div className="rounded-xl overflow-hidden bg-slate-900 border border-slate-800">
-                    <div ref={ytContainerRef} className="w-full aspect-video" />
-                  </div>
-                </div>
-                {/* Keep ref container in DOM even when hidden so IFrame persists */}
-                {!showPlayer && <div ref={ytContainerRef} className="hidden" />}
-
                 {/* Controls row */}
                 <div className="flex items-center justify-between shrink-0 flex-wrap gap-y-2">
                   <div className="flex items-center gap-3 flex-wrap">
@@ -509,6 +538,22 @@ export default function YiJianMeiApp() {
                   </div>
 
                   <div className="flex items-center gap-2">
+                    {/* Save to library */}
+                    {isReady && (
+                      <button
+                        onClick={handleSave}
+                        title="保存到歌单"
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs border transition-all ${
+                          justSaved
+                            ? 'bg-emerald-950 text-emerald-400 border-emerald-900'
+                            : 'bg-slate-900/80 text-slate-500 border-slate-800 hover:text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        {justSaved ? <BookmarkCheck size={11} /> : <Bookmark size={11} />}
+                        <span>{justSaved ? '已保存' : '保存'}</span>
+                      </button>
+                    )}
+
                     <button
                       onClick={() => void handlePlayNorwegian()}
                       disabled={isTranslating && lines.filter(l => l.no).length === 0}
@@ -522,7 +567,7 @@ export default function YiJianMeiApp() {
                       <span>{isPlayingNo ? '暂停' : '全文朗读'}</span>
                     </button>
                     <button
-                      onClick={handleReset}
+                      onClick={doReset}
                       className="text-[10px] text-slate-700 hover:text-slate-500 transition-colors border border-slate-800 hover:border-slate-700 px-2.5 py-1.5 rounded-full"
                     >
                       重新设置
@@ -547,12 +592,10 @@ export default function YiJianMeiApp() {
                         }`}
                       >
                         <div className="flex items-start gap-3">
-                          {/* Line number */}
                           <span className={`text-[10px] font-mono mt-0.5 shrink-0 w-5 text-right ${
                             isActive ? 'text-emerald-500' : 'text-slate-700'
                           }`}>{index + 1}</span>
 
-                          {/* Text */}
                           <div className="flex-1 min-w-0">
                             <p className={`text-base leading-snug transition-colors ${
                               isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-300'
@@ -560,7 +603,6 @@ export default function YiJianMeiApp() {
                               {line.cn}
                             </p>
 
-                            {/* Norwegian translation — each word is clickable for tooltip */}
                             <div className="flex flex-wrap gap-x-1 gap-y-0.5 mt-1 min-h-[1.2rem]">
                               {line.no ? (
                                 line.no.split(' ').map((word, wi) => (
@@ -584,9 +626,7 @@ export default function YiJianMeiApp() {
                             </div>
                           </div>
 
-                          {/* Per-line controls — stopPropagation so row click isn't triggered */}
                           <div className="flex items-center gap-0.5 shrink-0 mt-0.5">
-                            {/* Seek YouTube */}
                             <button
                               onClick={e => { e.stopPropagation(); handleSeek(line); }}
                               title={ytReady ? `跳至 ${line.timestamp + offsetDelta}s` : '播放器未就绪'}
@@ -598,8 +638,6 @@ export default function YiJianMeiApp() {
                             >
                               <Play size={10} />
                             </button>
-
-                            {/* Single-line repeat */}
                             <button
                               onClick={e => handleToggleRepeat(e, index)}
                               title={isRepeat ? '取消循环' : '单句循环'}
@@ -611,8 +649,6 @@ export default function YiJianMeiApp() {
                             >
                               <Repeat size={10} />
                             </button>
-
-                            {/* Norwegian TTS */}
                             <button
                               onClick={e => handleNorwegianSingle(e, line, index)}
                               title="朗读挪威语"
@@ -627,7 +663,6 @@ export default function YiJianMeiApp() {
                           </div>
                         </div>
 
-                        {/* Soundwave bars */}
                         {isActive && (
                           <div className="mt-2 ml-8 flex gap-0.5 items-end h-3">
                             {[0, 1, 2, 3, 4].map(i => (
@@ -717,22 +752,81 @@ export default function YiJianMeiApp() {
             )}
           </div>
         )}
+
+        {/* ── Tab 4: 我的歌单 ── */}
+        {activeTab === 'library' && (
+          <div className="flex flex-col gap-4 h-full animate-fadeIn">
+            <div className="shrink-0">
+              <h2 className="text-lg font-light text-slate-200">我的歌单</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {library.length === 0
+                  ? '还没有保存的歌曲。在歌词学习页面翻译完成后点击「保存」。'
+                  : `已保存 ${library.length} 首歌曲，点击「加载」可直接恢复，无需重新翻译。`}
+              </p>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-3 min-h-0">
+              {library.map(entry => (
+                <div
+                  key={entry.id}
+                  className="p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-slate-700 transition-all"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-slate-200 font-light truncate">{entry.title}</p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">
+                        {entry.lines.length} 行歌词 · {new Date(entry.savedAt).toLocaleDateString('zh-TW')}
+                      </p>
+                      <p className="text-[10px] text-slate-700 font-mono mt-0.5 truncate">
+                        {entry.ytUrl}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => removeEntry(entry.id)}
+                      title="删除"
+                      className="p-1.5 rounded-full text-slate-700 hover:text-red-400 hover:bg-red-950/30 transition-all shrink-0"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => handleLoadSaved(entry)}
+                    className="mt-3 w-full py-1.5 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-900/60 hover:bg-emerald-900/40 transition-all text-xs tracking-wider flex items-center justify-center gap-1.5"
+                  >
+                    <Play size={10} />
+                    加载这首歌
+                  </button>
+                </div>
+              ))}
+
+              {library.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-slate-700">
+                  <BookOpen size={32} className="opacity-40" />
+                  <p className="text-sm">歌单是空的</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
 
       {/* 底部导航 */}
       <footer className="p-5 flex justify-center z-10 shrink-0">
-        <nav className="flex space-x-2 bg-slate-900/60 backdrop-blur-md p-1.5 rounded-full border border-slate-800/80">
+        <nav className="flex space-x-1.5 bg-slate-900/60 backdrop-blur-md p-1.5 rounded-full border border-slate-800/80">
           {(
             [
-              { id: 'listen', icon: <Compass size={14} />, label: '歌词学习' },
-              { id: 'forest', icon: <Trees size={14} />,   label: '意象森林' },
-              { id: 'write',  icon: <PenTool size={14} />, label: '微写作'  },
-            ] as { id: TabId; icon: ReactNode; label: string }[]
-          ).map(({ id, icon, label }) => (
+              { id: 'listen',  icon: <Compass size={14} />,  label: '歌词学习' },
+              { id: 'forest',  icon: <Trees size={14} />,    label: '意象森林' },
+              { id: 'write',   icon: <PenTool size={14} />,  label: '微写作'  },
+              { id: 'library', icon: <BookOpen size={14} />, label: '我的歌单',
+                badge: library.length > 0 ? library.length : undefined },
+            ] as { id: TabId; icon: ReactNode; label: string; badge?: number }[]
+          ).map(({ id, icon, label, badge }) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-full text-xs tracking-wider transition-all ${
+              className={`relative flex items-center space-x-2 px-3.5 py-2 rounded-full text-xs tracking-wider transition-all ${
                 activeTab === id
                   ? 'bg-emerald-950 text-emerald-400 font-medium'
                   : 'text-slate-400 hover:text-slate-200'
@@ -740,6 +834,11 @@ export default function YiJianMeiApp() {
             >
               {icon}
               <span>{label}</span>
+              {badge !== undefined && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-600 text-white text-[9px] flex items-center justify-center font-mono">
+                  {badge > 9 ? '9+' : badge}
+                </span>
+              )}
             </button>
           ))}
         </nav>
