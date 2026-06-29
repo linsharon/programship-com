@@ -26,6 +26,77 @@ interface WordTooltip {
   yBottom: number;
 }
 
+// ── ADHD + Hesse 语法笔记 ─────────────────────────────────────────────────
+function getGrammarNote(word: string, type?: string): string {
+  const w = word.toLowerCase().trim();
+  const t = (type ?? '').toLowerCase();
+
+  const isNoun = t.includes('noun') || t.includes('名詞') || t.includes('substantiv');
+  const isVerb = t.includes('verb');
+  const isAdj  = t.includes('adjective') || t.includes('adjektiv') || t.includes('形容詞');
+  const isAdv  = t.includes('adverb');
+
+  // ── 词形特征优先 ──────────────────────────────────────────
+
+  // -ene: definite plural
+  if (w.endsWith('ene') && w.length > 5) {
+    return '复数定冠词 · -ene\n"那些……们"——挪威语把 the 和复数都挤进了词尾。\n去掉 -ene，就找到了单数的原型。';
+  }
+
+  // -het: abstract noun (stillhet, kjærlighet...)
+  if (w.endsWith('het') && w.length > 5) {
+    return '抽象名词 · -het = "-性 / -感 / -度"\n把形容词变成可以感受却无法触摸的东西——\n像把"安静"变成了"寂静感本身"。';
+  }
+
+  // -else: verbal noun (følelse, forståelse...)
+  if (w.endsWith('else') && w.length > 6) {
+    return '名词 · -else 把动词凝固成名词\n动作因此成为可以命名、可以珍藏的存在——\n语言在这里完成了对自身的一次沉思。';
+  }
+
+  // -lig / -ig: adjective suffix
+  if ((w.endsWith('lig') || (w.endsWith('ig') && !w.endsWith('dig'))) && w.length > 5 && !isVerb) {
+    const root = w.endsWith('lig') ? w.slice(0, -3) : w.slice(0, -2);
+    return `-lig / -ig · 形容词后缀，如"……般的"\n词根「${root}」是核心；后缀只是给它染上了色彩。\n记住词根，你就找到了一个词族的入口。`;
+  }
+
+  // Definite neuter noun: -et
+  if (w.endsWith('et') && w.length > 4 && isNoun && !isVerb) {
+    return '中性名词定冠词 · -et = "那个"（中性）\n挪威名词有性别，中性词的 the 是 -et。\n去掉它，词回到无冠词的原初状态。';
+  }
+
+  // Definite common noun: -en / -a
+  if ((w.endsWith('en') || w.endsWith('a')) && w.length > 4 && (isNoun || (!isVerb && !isAdj))) {
+    const s = w.endsWith('en') ? '-en' : '-a';
+    return `定冠词 · ${s} = "那个"（通性）\n挪威语把 the 融进词尾，像记忆附在经历上——\n剥去它，意义仍在，只是不再特指任何一个。`;
+  }
+
+  // Past tense verb: -te / -de
+  if (isVerb && (w.endsWith('te') || w.endsWith('de')) && w.length > 3) {
+    const suffix = w.endsWith('te') ? '-te' : '-de';
+    return `动词 · 过去式（${suffix}）\n动作已完成，封存在语言的另一端——\n去掉后缀，就回到了动词现在的样子。`;
+  }
+
+  // Infinitive verb: -e
+  if (isVerb && w.endsWith('e') && w.length > 3) {
+    return `动词原形 · 以 -e 结尾\n这是它最纯粹的样子，还没被时间限定。\nå ${word} ——"去……"，是挪威语动词的标准引用形式。`;
+  }
+
+  // Compound word
+  const compParts = ['snø', 'vann', 'sol', 'dag', 'natt', 'vind', 'skog', 'hav', 'fjell', 'fugl', 'lys', 'vår', 'høst', 'vinter', 'sommer', 'hjem', 'land', 'folk', 'stein', 'tre'];
+  const foundPart = compParts.find(p => w.includes(p) && w.length > p.length + 2);
+  if (foundPart && w.length >= 7) {
+    return `复合词 · 挪威语的拼图游戏\n「${word}」里藏着「${foundPart}」——试着把它拆开，\n两个灵魂合为一体，诞生了一个新的意义。`;
+  }
+
+  // ── 按词性兜底 ────────────────────────────────────────────
+  if (isNoun) return '名词 · 存在本身，不需行动\n像一块石头，像一片雪，像内心最深处那个无需解释的词——\n句子因它而有了重量和落脚之处。';
+  if (isVerb) return '动词 · 句子的心跳\n有了它，世界开始流动、呼吸、感受——\n找到动词，就找到了这句话真正想说的事。';
+  if (isAdj)  return '形容词 · 给世界染上颜色与温度\n没有它，雪只是雪；有了它，才有了"确切的那种白"。\n在挪威语里，它还会随名词的性别悄悄变形。';
+  if (isAdv)  return '副词 · 情绪的背景音\n它不改变事实，只改变感受的方式——\n像林间弥漫的雾气，无形却无处不在。';
+
+  return '';
+}
+
 // ── Forest concept generation ──────────────────────────────────────────────
 const NO_STOPWORDS = new Set([
   'og', 'er', 'det', 'jeg', 'du', 'vi', 'de', 'den', 'en', 'et',
@@ -406,12 +477,12 @@ export default function YiJianMeiApp() {
           ref={tooltipRef}
           style={{
             position: 'fixed',
-            left: Math.min(Math.max(wordTooltip.x, 8), window.innerWidth - 272),
+            left: Math.min(Math.max(wordTooltip.x, 8), window.innerWidth - 308),
             top: wordTooltip.y > 200 ? wordTooltip.y - 8 : wordTooltip.yBottom + 8,
             transform: wordTooltip.y > 200 ? 'translateY(-100%)' : 'none',
             zIndex: 50,
           }}
-          className="w-64 p-3 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl shadow-black/60 animate-fadeIn"
+          className="w-72 p-3 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl shadow-black/60 animate-fadeIn"
         >
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-2 flex-wrap">
@@ -436,6 +507,17 @@ export default function YiJianMeiApp() {
                   亦可译：{(wordTooltip.analysis.alternatives ?? []).join('、')}
                 </p>
               )}
+              {(() => {
+                const note = getGrammarNote(wordTooltip.word, wordTooltip.analysis.type);
+                return note ? (
+                  <div className="mt-2 pt-2.5 border-t border-slate-800/70">
+                    <p className="text-[9px] text-emerald-700 font-mono tracking-widest uppercase mb-1.5">语法笔记</p>
+                    <p className="text-[11px] text-slate-400 font-light leading-relaxed whitespace-pre-line">
+                      {note}
+                    </p>
+                  </div>
+                ) : null;
+              })()}
             </div>
           ) : null}
           <button
