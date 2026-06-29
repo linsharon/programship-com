@@ -13,24 +13,43 @@ export type LyricStatus = 'idle' | 'scraping' | 'translating' | 'ready' | 'error
 const PROXIES = [
   (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
   (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  (u: string) => `https://corsproxy.org/?${encodeURIComponent(u)}`,
   (u: string) => `https://thingproxy.freeboard.io/fetch/${u}`,
 ];
+
+const PROXY_TIMEOUT_MS = 7000;
 
 async function fetchViaProxy(url: string): Promise<string> {
   const errors: string[] = [];
   for (const makeUrl of PROXIES) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), PROXY_TIMEOUT_MS);
     try {
-      const res = await fetch(makeUrl(url));
+      const res = await fetch(makeUrl(url), { signal: ctrl.signal });
+      clearTimeout(timer);
       if (res.ok) {
         const text = await res.text();
-        // If proxy returned an error page instead of the target page, skip
         if (text.length > 500) return text;
       }
     } catch (e) {
-      errors.push(String(e));
+      clearTimeout(timer);
+      errors.push(e instanceof Error ? e.message : String(e));
     }
   }
-  throw new Error(`代理访问失败（${errors[0] ?? '未知错误'}）。请改用手动粘贴歌词。`);
+  // Distinguish network-level failure from empty-response failure
+  const isNetworkError = errors.some(e =>
+    e.includes('Failed to fetch') || e.includes('NetworkError') ||
+    e.includes('abort') || e.includes('CORS'),
+  );
+  if (isNetworkError) {
+    throw new Error(
+      'PROXY_BLOCKED',
+    );
+  }
+  throw new Error(
+    'PROXY_EMPTY',
+  );
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -78,7 +97,22 @@ export function parsePlainLyrics(text: string): string[] {
 }
 
 async function scrapeKkbox(url: string): Promise<string[]> {
-  const html = await fetchViaProxy(url);
+  let html: string;
+  try {
+    html = await fetchViaProxy(url);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === 'PROXY_BLOCKED') {
+      throw new Error(
+        '所有 CORS 代理均无法访问（网络被拦截或代理服务不可用）。\n' +
+        '请在 KKBOX 歌词页面直接复制歌词文本，然后切换到「手动粘贴」模式粘贴。',
+      );
+    }
+    throw new Error(
+      '代理返回空页面，KKBOX 可能需要登录才能查看歌词。\n' +
+      '请切换到「手动粘贴」模式。',
+    );
+  }
   const doc  = new DOMParser().parseFromString(html, 'text/html');
 
   // Strategy 1: Next.js __NEXT_DATA__ — most reliable if SSR includes lyrics

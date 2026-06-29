@@ -84,7 +84,7 @@ export default function YiJianMeiApp() {
   const [ytUrl,        setYtUrl]        = useState('');
   const [kkboxUrl,     setKkboxUrl]     = useState('');
   const [manualLyrics, setManualLyrics] = useState('');
-  const [lyricsMode,   setLyricsMode]   = useState<'url' | 'paste'>('url');
+  const [lyricsMode,   setLyricsMode]   = useState<'url' | 'paste'>('paste');
   const [inputErr,     setInputErr]     = useState('');
   const [starting,     setStarting]     = useState(false);
 
@@ -545,9 +545,17 @@ export default function YiJianMeiApp() {
                   </div>
 
                   {(inputErr || error) && (
-                    <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2 leading-relaxed">
-                      {inputErr || error}
-                    </p>
+                    <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2 leading-relaxed space-y-2">
+                      <p style={{ whiteSpace: 'pre-line' }}>{inputErr || error}</p>
+                      {lyricsMode === 'url' && (
+                        <button
+                          onClick={() => { setLyricsMode('paste'); setInputErr(''); }}
+                          className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2 text-xs transition-colors"
+                        >
+                          一键切换到手动粘贴模式 →
+                        </button>
+                      )}
+                    </div>
                   )}
                   <button
                     onClick={() => void handleStart()}
